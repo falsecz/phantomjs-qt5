@@ -881,13 +881,12 @@ void WebPage::openUrl(const QString &address, const QVariant &op, const QVariant
     } else {
         QUrl url = QUrl::fromEncoded(QByteArray(address.toLatin1()));
 
-#if QT_VERSION == QT_VERSION_CHECK(4, 8, 0)
         // Assume local file if scheme is empty
         if (url.scheme().isEmpty()) {
             url.setPath(QFileInfo(url.toString()).absoluteFilePath().prepend("/"));
             url.setScheme("file");
         }
-#endif
+
         request.setUrl(url);
         m_mainFrame->load(request, networkOp, body);
     }
