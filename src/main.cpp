@@ -48,9 +48,6 @@
 #ifdef Q_OS_WIN32
 using namespace google_breakpad;
 static google_breakpad::ExceptionHandler* eh;
-#if !defined(QT_SHARED) && !defined(QT_DLL)
-Q_IMPORT_PLUGIN(qico)
-#endif
 #endif
 
 #if QT_VERSION != QT_VERSION_CHECK(5, 3, 0)
