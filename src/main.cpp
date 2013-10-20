@@ -45,15 +45,6 @@
 #include <QApplication>
 #include <QSslSocket>
 
-#if !defined(QT_SHARED) && !defined(QT_DLL)
-#include <QtPlugin>
-
-Q_IMPORT_PLUGIN(qcncodecs)
-Q_IMPORT_PLUGIN(qjpcodecs)
-Q_IMPORT_PLUGIN(qkrcodecs)
-Q_IMPORT_PLUGIN(qtwcodecs)
-#endif
-
 #ifdef Q_OS_WIN32
 using namespace google_breakpad;
 static google_breakpad::ExceptionHandler* eh;
