@@ -115,7 +115,7 @@ mac {
 }
 
 win32-msvc* {
-    LIBS += -lCrypt32
+    LIBS += -lCrypt32 -llibxml2_a
     INCLUDEPATH += breakpad/src
     SOURCES += breakpad/src/client/windows/handler/exception_handler.cc \
       breakpad/src/client/windows/crash_generation/crash_generation_client.cc \
