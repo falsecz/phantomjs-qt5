@@ -110,27 +110,22 @@ INCLUDEPATH += \
 
 INCLUDEPATH += $$WEBCORE_GENERATED_SOURCES_DIR
 
-use?(LIBXML2) {
-    mac {
-        INCLUDEPATH += /usr/include/libxml2
-        LIBS += -lxml2
-    } else:!contains(QT_CONFIG, no-pkg-config) {
-        PKGCONFIG += libxml-2.0
-    } else:!win32-* {
-        INCLUDEPATH += /usr/include/libxml2
-        LIBS += -lxml2
-    }
-}
-
 enable?(XSLT) {
-    mac {
-        INCLUDEPATH += /usr/include/libxslt
-        LIBS += -lxslt
-    } else:!contains(QT_CONFIG, no-pkg-config) {
-        PKGCONFIG += libxslt
+    use?(LIBXML2) {
+        mac {
+            QMAKE_CXXFLAGS += -iwithsysroot /usr/include/libxslt -iwithsysroot /usr/include/libxml2
+            LIBS += -lxml2 -lxslt
+        } else:!contains(QT_CONFIG, no-pkg-config) {
+            PKGCONFIG += libxslt libxml-2.0
+        } else:!win32-* {
+            INCLUDEPATH += /usr/include/libxml2
+            LIBS += -lxml2
+        }
     } else {
-        LIBS += -lxslt
+        QT *= xmlpatterns
     }
+} else:!mac:use?(LIBXML2) {
+    PKGCONFIG += libxml-2.0
 }
 
 use?(ZLIB) {
