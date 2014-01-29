@@ -51,7 +51,11 @@
 QT_BEGIN_NAMESPACE
 class QCocoaWindow;
 class QCocoaBackingStore;
+
+#ifndef QT_NO_OPENGL
 class QCocoaGLContext;
+#endif
+
 QT_END_NAMESPACE
 
 @interface QNSView : NSView <NSTextInputClient> {
@@ -69,13 +73,21 @@ QT_END_NAMESPACE
     bool m_sendUpAsRightButton;
     Qt::KeyboardModifiers currentWheelModifiers;
     bool m_subscribesForGlobalFrameNotifications;
+
+#ifndef QT_NO_OPENGL
     QCocoaGLContext *m_glContext;
     bool m_shouldSetGLContextinDrawRect;
+#endif
+
 }
 
 - (id)init;
 - (id)initWithQWindow:(QWindow *)window platformWindow:(QCocoaWindow *) platformWindow;
+
+#ifndef QT_NO_OPENGL
 - (void)setQCocoaGLContext:(QCocoaGLContext *)context;
+#endif
+
 - (void)flushBackingStore:(QCocoaBackingStore *)backingStore region:(const QRegion &)region offset:(QPoint)offset;
 - (void)setMaskRegion:(const QRegion *)region;
 - (void)invalidateWindowShadowIfNeeded;

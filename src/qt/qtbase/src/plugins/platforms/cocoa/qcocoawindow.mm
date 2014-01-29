@@ -43,7 +43,11 @@
 #include "qnswindowdelegate.h"
 #include "qcocoaautoreleasepool.h"
 #include "qcocoaeventdispatcher.h"
+
+#ifndef QT_NO_OPENGL
 #include "qcocoaglcontext.h"
+#endif
+
 #include "qcocoahelpers.h"
 #include "qnsview.h"
 #include <QtCore/qfileinfo.h>
@@ -208,7 +212,9 @@ QCocoaWindow::QCocoaWindow(QWindow *tlw)
     , m_windowModality(Qt::NonModal)
     , m_windowUnderMouse(false)
     , m_inConstructor(true)
+#ifndef QT_NO_OPENGL
     , m_glContext(0)
+#endif
     , m_menubar(0)
     , m_windowCursor(0)
     , m_hasModalSession(false)
@@ -792,6 +798,7 @@ bool QCocoaWindow::windowIsPopupType(Qt::WindowType type) const
     return ((type & Qt::Popup) == Qt::Popup);
 }
 
+#ifndef QT_NO_OPENGL
 void QCocoaWindow::setCurrentContext(QCocoaGLContext *context)
 {
     m_glContext = context;
@@ -801,6 +808,7 @@ QCocoaGLContext *QCocoaWindow::currentContext() const
 {
     return m_glContext;
 }
+#endif
 
 void QCocoaWindow::recreateWindow(const QPlatformWindow *parentWindow)
 {

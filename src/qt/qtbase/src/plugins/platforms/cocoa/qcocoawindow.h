@@ -47,7 +47,10 @@
 #include <qpa/qplatformwindow.h>
 #include <QRect>
 
+#ifndef QT_NO_OPENGL
 #include "qcocoaglcontext.h"
+#endif
+
 #include "qnsview.h"
 
 QT_FORWARD_DECLARE_CLASS(QCocoaWindow)
@@ -142,8 +145,10 @@ public:
     NSUInteger windowStyleMask(Qt::WindowFlags flags);
     void setWindowShadow(Qt::WindowFlags flags);
 
+#ifndef QT_NO_OPENGL
     void setCurrentContext(QCocoaGLContext *context);
     QCocoaGLContext *currentContext() const;
+#endif
 
     bool setWindowModified(bool modified) Q_DECL_OVERRIDE;
 
@@ -198,7 +203,11 @@ public: // for QNSView
     bool m_windowUnderMouse;
 
     bool m_inConstructor;
+
+#ifndef QT_NO_OPENGL
     QCocoaGLContext *m_glContext;
+#endif
+
     QCocoaMenuBar *m_menubar;
     NSCursor *m_windowCursor;
 

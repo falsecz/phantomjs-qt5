@@ -57,7 +57,11 @@
 #include <QtCore/QDebug>
 #include <private/qguiapplication_p.h>
 #include "qcocoabackingstore.h"
+
+#ifndef QT_NO_OPENGL
 #include "qcocoaglcontext.h"
+#endif
+
 #include "qcocoaintegration.h"
 
 #ifdef QT_COCOA_ENABLE_ACCESSIBILITY_INSPECTOR
@@ -86,8 +90,12 @@ static QTouchDevice *touchDevice = 0;
         m_buttons = Qt::NoButton;
         m_sendKeyEvent = false;
         m_subscribesForGlobalFrameNotifications = false;
+
+#ifndef QT_NO_OPENGL
         m_glContext = 0;
         m_shouldSetGLContextinDrawRect = false;
+#endif
+
         currentCustomDragTypes = 0;
         m_sendUpAsRightButton = false;
 
@@ -150,6 +158,7 @@ static QTouchDevice *touchDevice = 0;
     return self;
 }
 
+#ifndef QT_NO_OPENGL
 - (void) setQCocoaGLContext:(QCocoaGLContext *)context
 {
     m_glContext = context;
@@ -171,6 +180,7 @@ static QTouchDevice *touchDevice = 0;
             object:self];
     }
 }
+#endif
 
 - (void) globalFrameChanged:(NSNotification*)notification
 {
@@ -403,10 +413,13 @@ static QTouchDevice *touchDevice = 0;
 
 - (void) drawRect:(NSRect)dirtyRect
 {
+
+#ifndef QT_NO_OPENGL
     if (m_glContext && m_shouldSetGLContextinDrawRect) {
         [m_glContext->nsOpenGLContext() setView:self];
         m_shouldSetGLContextinDrawRect = false;
     }
+#endif
 
     if (!m_backingStore)
         return;
