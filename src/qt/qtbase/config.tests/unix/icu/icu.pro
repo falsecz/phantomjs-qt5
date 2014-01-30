@@ -11,6 +11,5 @@ win32 {
     } else {
         LIBS += -licuin -licuuc
     }
-} else {
-    LIBS += -licui18n -licuuc
-}
+} else:!contains(QT_CONFIG,no-pkg-config):packagesExist("icu-i18n"): PKGCONFIG *= icu-i18n
+  else:LIBS += -licui18n -licuuc

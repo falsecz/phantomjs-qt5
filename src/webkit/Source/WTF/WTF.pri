@@ -13,16 +13,18 @@ mac {
     # Therefore WebKit provides adequate header files.
     INCLUDEPATH += $${ROOT_WEBKIT_DIR}/Source/WTF/icu
     LIBS += -licucore
-} else {
-    contains(QT_CONFIG,icu) {
-        win32: {
-            contains(QT_CONFIG,static) {
-                CONFIG(debug, debug|release) {
-                    LIBS += -lsicuind -lsicuucd -lsicudtd
-                } else: LIBS += -lsicuin -lsicuuc -lsicudt
-            } else: LIBS += -licuin -licuuc -licudt
-        } else: LIBS += -licui18n -licuuc -licudata
-    }
+}
+
+# Mac OS requires libicu to build JavaScriptCore
+contains(QT_CONFIG,icu) {
+    win32: {
+        contains(QT_CONFIG,static) {
+            CONFIG(debug, debug|release) {
+                LIBS += -lsicuind -lsicuucd -lsicudtd
+            } else: LIBS += -lsicuin -lsicuuc -lsicudt
+        } else: LIBS += -licuin -licuuc -licudt
+    } else:!contains(QT_CONFIG,no-pkg-config):packagesExist("icu-i18n"): PKGCONFIG *= icu-i18n
+    else: LIBS += -licui18n -licuuc -licudata
 }
 
 linux-*:use?(GSTREAMER) {
