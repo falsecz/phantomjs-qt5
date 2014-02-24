@@ -483,7 +483,8 @@ void Phantom::doExit(int code)
     emit aboutToExit(code);
     m_terminated = true;
     m_returnValue = code;
-    qDeleteAll(m_pages);
+    foreach (QPointer<WebPage> page, m_pages)
+      page->deleteLater();
     m_pages.clear();
     m_page = 0;
     QApplication::instance()->exit(code);
