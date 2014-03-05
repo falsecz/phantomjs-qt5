@@ -84,7 +84,7 @@ static const struct QCommandLineConfigEntry flags[] =
 Config::Config(QObject *parent)
     : QObject(parent)
 {
-    m_cmdLine = new QCommandLine;
+    m_cmdLine = new QCommandLine(this);
 
     // We will handle --help and --version ourselves in phantom.cpp
     m_cmdLine->enableHelp(false);
