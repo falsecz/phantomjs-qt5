@@ -41,12 +41,13 @@ function decorateCookieJar(jar) {
     /* Getting and Setting jar.cookies gets and sets all the cookies in the
      * cookie jar.
      */
-    jar.__defineGetter__('cookies', function() {
-        return this.cookiesToMap();
-    });
-
-    jar.__defineSetter__('cookies', function(cookies) {
+    Object.defineProperty(jar, 'cookies', {
+        get: function() {
+            return this.cookiesToMap();
+        },
+        set: function(cookies) {
             this.addCookiesFromMap(cookies);
+        }
     });
 
     return jar;
