@@ -38,6 +38,7 @@
 #include <QDebug>
 #include <QMetaObject>
 #include <QMetaProperty>
+#include <QStandardPaths>
 
 #include "consts.h"
 #include "terminal.h"
@@ -98,6 +99,16 @@ void Phantom::init()
 
     // Initialize the CookieJar
     m_defaultCookieJar = new CookieJar(m_config.cookiesFile());
+
+    QWebSettings::setOfflineWebApplicationCachePath(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
+    if (m_config.offlineStoragePath().isEmpty()) {
+        QWebSettings::setOfflineStoragePath(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
+    } else {
+        QWebSettings::setOfflineStoragePath(m_config.offlineStoragePath());
+    }
+    if (m_config.offlineStorageDefaultQuota() > 0) {
+        QWebSettings::setOfflineStorageDefaultQuota(m_config.offlineStorageDefaultQuota());
+    }
 
     m_page = new WebPage(this, QUrl::fromLocalFile(m_config.scriptFile()));
     m_page->setCookieJar(m_defaultCookieJar);

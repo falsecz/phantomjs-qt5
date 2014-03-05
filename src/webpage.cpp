@@ -385,18 +385,7 @@ WebPage::WebPage(QObject *parent, const QUrl &baseUrl)
     m_mainFrame->setScrollBarPolicy(Qt::Vertical, Qt::ScrollBarAlwaysOff);
 
     m_customWebPage->settings()->setAttribute(QWebSettings::OfflineStorageDatabaseEnabled, true);
-    if (phantomCfg->offlineStoragePath().isEmpty()) {
-        m_customWebPage->settings()->setOfflineStoragePath(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
-    } else {
-        m_customWebPage->settings()->setOfflineStoragePath(phantomCfg->offlineStoragePath());
-    }
-    if (phantomCfg->offlineStorageDefaultQuota() > 0) {
-        m_customWebPage->settings()->setOfflineStorageDefaultQuota(phantomCfg->offlineStorageDefaultQuota());
-    }
-
     m_customWebPage->settings()->setAttribute(QWebSettings::OfflineWebApplicationCacheEnabled, true);
-    m_customWebPage->settings()->setOfflineWebApplicationCachePath(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
-
     m_customWebPage->settings()->setAttribute(QWebSettings::FrameFlatteningEnabled, true);
 
     m_customWebPage->settings()->setAttribute(QWebSettings::LocalStorageEnabled, true);
