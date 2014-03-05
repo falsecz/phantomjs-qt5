@@ -141,6 +141,8 @@ void Phantom::init()
     // Set script file encoding
     m_scriptFileEnc.setEncoding(m_config.scriptEncoding());
 
+    connect(m_page, SIGNAL(javaScriptErrorSent(QString,int,QString,QString)),
+            SLOT(printErrorMessage(QString,int,QString,QString)));
     connect(m_page, SIGNAL(javaScriptConsoleMessageSent(QString)),
             SLOT(printConsoleMessage(QString)));
     connect(m_page, SIGNAL(initialized()),
@@ -436,6 +438,11 @@ void Phantom::debugExit(int code)
 void Phantom::printConsoleMessage(const QString &message)
 {
     Terminal::instance()->cout(message);
+}
+
+void Phantom::printErrorMessage(const QString& msg, int lineNumber, const QString& sourceID, const QString& stack)
+{
+  Terminal::instance()->cerr(QString("Error while executing JavaScript in file %1:%2: %3\n%4").arg(sourceID).arg(lineNumber).arg(msg).arg(stack));
 }
 
 void Phantom::onInitialized()
