@@ -417,43 +417,6 @@ function decorateNewPage(opts, page) {
     };
 
     /**
-     * get and set cookie jar for the page
-     */
-    Object.defineProperty(page, "cookieJar", {
-        get: function() {
-            return require("cookiejar").decorate(this.cookieJar());
-        },
-        set: function(cookieJar) {
-            this.setCookieJarFromQObject(cookieJar);
-        }
-    });
-
-    /**
-     * get and set cookies of the page
-     */
-    Object.defineProperty(page, "cookies", {
-        get: function() {
-            return this.cookies;
-        },
-        /**
-        * set cookies of the page
-        * @param []{...} cookies an array of cookies object with arguments in mozilla cookie format
-        *        cookies[0] = {
-        *            'name' => 'Cookie-Name',
-        *            'value' => 'Cookie-Value',
-        *            'domain' => 'foo.com',
-        *            'path' => 'Cookie-Path',
-        *            'expires' => 'Cookie-Expiration-Date',
-        *            'httponly' => true | false,
-        *            'secure' => true | false
-        *        };
-        */
-        set: function(cookies) {
-            this.setCookies(cookies);
-        }
-    });
-
-    /**
      * upload a file
      * @param {string}       selector  css selector for the file input element
      * @param {string,array} fileNames the name(s) of the file(s) to upload

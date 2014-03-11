@@ -79,6 +79,8 @@ class WebPage : public QObject
     Q_PROPERTY(QString frameName READ frameName)
     Q_PROPERTY(int framesCount READ framesCount)
     Q_PROPERTY(QString focusedFrameName READ focusedFrameName)
+    Q_PROPERTY(CookieJar *cookieJar READ cookieJar WRITE setCookieJarFromQObject)
+    Q_PROPERTY(QVariantList cookies READ cookies WRITE setCookies)
 
 public:
     WebPage(QObject *parent, const QUrl &baseUrl = QUrl());
