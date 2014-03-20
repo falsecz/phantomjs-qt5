@@ -8,7 +8,7 @@ DESTDIR = ../bin
 RESOURCES = phantomjs.qrc \
     ghostdriver/ghostdriver.qrc
 
-QTPLUGIN += qoffscreen
+QTPLUGIN += phantomplatform
 
 HEADERS += csconverter.h \
     phantom.h \
