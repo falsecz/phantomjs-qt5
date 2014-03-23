@@ -11,7 +11,7 @@ QT_CFG+=' -static'
 
 if [[ $OSTYPE != darwin* ]]; then
     QT_CFG+=' -fontconfig'      # Fontconfig for better font matching
-    QT_CFG+=' -qpa minimal'
+    QT_CFG+=' -qpa phantom'
 fi
 
 QT_CFG+=' -release'             # Build only for release (no debugging support)
