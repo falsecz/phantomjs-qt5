@@ -1200,7 +1200,7 @@ bool WebPage::renderPdf(const QString &fileName)
 
     printer.setPageMargins(marginLeft, marginTop, marginRight, marginBottom, QPrinter::Point);
 
-    m_mainFrame->print(&printer);
+    m_mainFrame->print(&printer, this);
     return true;
 }
 
