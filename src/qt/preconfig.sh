@@ -8,10 +8,10 @@ QT_CFG+=' -opensource'          # Use the open-source license
 QT_CFG+=' -confirm-license'     # Silently acknowledge the license confirmation
 QT_CFG+=' -v'                   # Makes it easier to see what header dependencies are missing
 QT_CFG+=' -static'
+QT_CFG+=' -qpa phantom'         # Default to our custom QPA platform
 
 if [[ $OSTYPE != darwin* ]]; then
     QT_CFG+=' -fontconfig'      # Fontconfig for better font matching
-    QT_CFG+=' -qpa phantom'
 fi
 
 QT_CFG+=' -release'             # Build only for release (no debugging support)
