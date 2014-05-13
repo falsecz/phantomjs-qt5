@@ -7,9 +7,13 @@ if /i "%1" == "debug" (
 )
 set ROOT_DIR=%CD%
 
-SET QT_LOG_FILE=!ROOT_DIR!\build_qt.log
-SET WEBKIT_LOG_FILE=!ROOT_DIR!\build_webkit.log
-set PHANTOMJS_LOG_FILE=!ROOT_DIR!\build_phantomjs.log
+SET BUILD_DATESTAMP=%date:~-4,4%%date:~-7,2%%date:~-10,2%
+SET BUILD_TIMESTAMP=%time:~-11,2%%time:~-8,2%
+:: replace leading space with 0
+set BUILD_TIMESTAMP=%BUILD_TIMESTAMP: =0%
+SET QT_LOG_FILE=!ROOT_DIR!\build_qt_!BUILD_DATESTAMP!-!BUILD_TIMESTAMP!.log
+SET WEBKIT_LOG_FILE=!ROOT_DIR!\build_webkit_!BUILD_DATESTAMP!_!BUILD_TIMESTAMP!.log
+set PHANTOMJS_LOG_FILE=!ROOT_DIR!\build_phantomjs_!BUILD_DATESTAMP!_!BUILD_TIMESTAMP!.log
 set MAKE_TOOL=nmake
 
 echo:
@@ -86,7 +90,7 @@ EXIT /b
 
 rem ========================================================================================================
 :build_webkit
-pushd !ROOT_DIR!\src\webkit
+pushd !ROOT_DIR!\src\qt\qtwebkit
 call :check_qmake
 call qmake.exe
 %MAKE_TOOL% %BUILD_TYPE% 2>&1 >> !WEBKIT_LOG_FILE!
