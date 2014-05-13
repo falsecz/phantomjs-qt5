@@ -1,4 +1,0 @@
-fun:*genericAddSpan*
-fun:*gatherFromCurrentThread*ConservativeRoots*
-fun:*SetCookieStoragePrivateBrowsingEnabled*
-fun:*HTMLTreeBuilder*finished*
