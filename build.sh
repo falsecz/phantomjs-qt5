@@ -89,11 +89,11 @@ EOF
     echo
 fi
 
-cd src/qt && ./preconfig.sh --jobs $COMPILE_JOBS --qt-config "$QT_CFG" && cd ../..
-export SQLITE3SRCDIR=$PWD/src/qt/qtbase/3rdparty/sqlite/
-cd src/webkit
-../qt/qtbase/bin/qmake $QMAKE_ARGS
+cd src/qt && ./preconfig.sh --jobs $COMPILE_JOBS --qt-config "$QT_CFG"
+export SQLITE3SRCDIR=$PWD/qtbase/3rdparty/sqlite/
+cd qtwebkit
+../qtbase/bin/qmake $QMAKE_ARGS
 make -j$COMPILE_JOBS
-cd ../..
+cd ../../..
 src/qt/qtbase/bin/qmake $QMAKE_ARGS
 make -j$COMPILE_JOBS

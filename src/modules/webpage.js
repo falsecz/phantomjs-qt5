@@ -36,19 +36,19 @@
 
 function checkType(o, type) {
     return typeof o === type;
-};
+}
 
 function isObject(o) {
     return checkType(o, 'object');
-};
+}
 
 function isUndefined(o) {
     return checkType(o, 'undefined');
-};
+}
 
 function isUndefinedOrNull(o) {
     return isUndefined(o) || null === o;
-};
+}
 
 function copyInto(target, source) {
     if (target === source || isUndefinedOrNull(source)) {
@@ -87,7 +87,7 @@ function copyInto(target, source) {
     }
 
     return target;
-};
+}
 
 function definePageSignalHandler(page, handlers, handlerName, signalName) {
     Object.defineProperty(page, handlerName, {
@@ -96,7 +96,7 @@ function definePageSignalHandler(page, handlers, handlerName, signalName) {
             if (!!handlers[handlerName] && typeof handlers[handlerName].callback === "function") {
                 try {
                     this[signalName].disconnect(handlers[handlerName].callback);
-                } catch (e) { }
+                } catch (e) {}
             }
 
             // Delete the previous handler
@@ -107,18 +107,17 @@ function definePageSignalHandler(page, handlers, handlerName, signalName) {
                 // Store the new handler for reference
                 handlers[handlerName] = {
                     callback: f
-                };
+                }
                 this[signalName].connect(f);
             }
         },
-
-        get: function () {
+        get: function() {
             return !!handlers[handlerName] && typeof handlers[handlerName].callback === "function" ?
                 handlers[handlerName].callback :
                 undefined;
         }
     });
-};
+}
 
 function definePageCallbackHandler(page, handlers, handlerName, callbackConstructor) {
     Object.defineProperty(page, handlerName, {
@@ -145,7 +144,7 @@ function definePageCallbackHandler(page, handlers, handlerName, callbackConstruc
                     // Callback will receive a "deserialized", normal "arguments" array
                     callbackObj.returnValue = f.apply(this, arguments[0]);
                 };
-            
+
                 // Store the new handler for reference
                 handlers[handlerName] = {
                     callback: f,
@@ -156,7 +155,6 @@ function definePageCallbackHandler(page, handlers, handlerName, callbackConstruc
                 callbackObj.called.connect(connector);
             }
         },
-
         get: function() {
             var handlerObj = handlers[handlerName];
             return (!!handlerObj && typeof handlerObj.callback === "function" && typeof handlerObj.connector === "function") ?
@@ -252,10 +250,12 @@ function decorateNewPage(opts, page) {
 
     definePageSignalHandler(page, handlers, "onNavigationRequested", "navigationRequested");
 
+    definePageSignalHandler(page, handlers, "onRepaintRequested", "repaintRequested");
+
     definePageSignalHandler(page, handlers, "onResourceRequested", "resourceRequested");
 
     definePageSignalHandler(page, handlers, "onResourceReceived", "resourceReceived");
-    
+
     definePageSignalHandler(page, handlers, "onResourceError", "resourceError");
 
     definePageSignalHandler(page, handlers, "onResourceTimeout", "resourceTimeout");
@@ -280,10 +280,10 @@ function decorateNewPage(opts, page) {
             this.openUrl(url, 'get', this.settings);
             return;
         } else if (arguments.length === 2 && typeof arg1 === 'function') {
-            this._onPageOpenFinished = function () {
+            this._onPageOpenFinished = function() {
                 thisPage._onPageOpenFinished = null; //< Disconnect callback (should fire only once)
                 arg1.apply(thisPage, arguments);     //< Invoke the actual callback
-            };
+            }
             this.openUrl(url, 'get', this.settings);
             return;
         } else if (arguments.length === 2) {
@@ -293,7 +293,7 @@ function decorateNewPage(opts, page) {
             this._onPageOpenFinished = function() {
                 thisPage._onPageOpenFinished = null; //< Disconnect callback (should fire only once)
                 arg2.apply(thisPage, arguments);     //< Invoke the actual callback
-            };
+            }
             this.openUrl(url, arg1, this.settings);
             return;
         } else if (arguments.length === 3) {
@@ -306,7 +306,7 @@ function decorateNewPage(opts, page) {
             this._onPageOpenFinished = function() {
                 thisPage._onPageOpenFinished = null; //< Disconnect callback (should fire only once)
                 arg3.apply(thisPage, arguments);     //< Invoke the actual callback
-            };
+            }
             this.openUrl(url, {
                 operation: arg1,
                 data: arg2
@@ -316,7 +316,7 @@ function decorateNewPage(opts, page) {
             this._onPageOpenFinished = function() {
                 thisPage._onPageOpenFinished = null; //< Disconnect callback (should fire only once)
                 arg4.apply(thisPage, arguments);     //< Invoke the actual callback
-            };
+            }
             this.openUrl(url, {
                 operation: arg1,
                 data: arg2,
@@ -371,7 +371,7 @@ function decorateNewPage(opts, page) {
             case "object":      //< for type "object"
             case "array":       //< for type "array"
             case "date":        //< for type "date"
-                str += "JSON.parse(" + JSON.stringify(JSON.stringify(arg)) + "),";
+                str += "JSON.parse(" + JSON.stringify(JSON.stringify(arg)) + "),"
                 break;
             case "string":      //< for type "string"
                 str += quoteString(arg) + ',';
@@ -417,30 +417,6 @@ function decorateNewPage(opts, page) {
     };
 
     /**
-     * get cookies of the page
-     */
-    page.__defineGetter__("cookies", function() {
-        return this.cookies;
-    });
-
-    /**
-     * set cookies of the page
-     * @param []{...} cookies an array of cookies object with arguments in mozilla cookie format
-     *        cookies[0] = {
-     *            'name' => 'Cookie-Name',
-     *            'value' => 'Cookie-Value',
-     *            'domain' => 'foo.com',
-     *            'path' => 'Cookie-Path',
-     *            'expires' => 'Cookie-Expiration-Date',
-     *            'httponly' => true | false,
-     *            'secure' => true | false
-     *        };
-     */
-    page.__defineSetter__("cookies", function(cookies) {
-        this.setCookies(cookies);
-    });
-
-    /**
      * upload a file
      * @param {string}       selector  css selector for the file input element
      * @param {string,array} fileNames the name(s) of the file(s) to upload
@@ -471,6 +447,9 @@ function decorateNewPage(opts, page) {
     // Calls from within the page to "window.prompt(message, defaultValue)" arrive to this handler
     // @see https://developer.mozilla.org/en/DOM/window.prompt
     definePageCallbackHandler(page, handlers, "onPrompt", "_getJsPromptCallback");
+
+    // Calls from within the page when some javascript code running to long
+    definePageCallbackHandler(page, handlers, "onLongRunningScript", "_getJsInterruptCallback");
 
     page.event = {};
     page.event.modifier = {

@@ -8,18 +8,16 @@ QT_CFG+=' -opensource'          # Use the open-source license
 QT_CFG+=' -confirm-license'     # Silently acknowledge the license confirmation
 QT_CFG+=' -v'                   # Makes it easier to see what header dependencies are missing
 QT_CFG+=' -static'
+QT_CFG+=' -qpa phantom'         # Default to our custom QPA platform
 
-if [[ $OSTYPE = darwin* ]]; then
-    QT_CFG+=' -arch x86'
-    QT_CFG+=' -qpa'
-else
+if [[ $OSTYPE != darwin* ]]; then
     QT_CFG+=' -fontconfig'      # Fontconfig for better font matching
-    QT_CFG+=' -qpa minimal'
 fi
 
 QT_CFG+=' -release'             # Build only for release (no debugging support)
 QT_CFG+=' -nomake examples'     # Don't build any examples
 QT_CFG+=' -nomake tools'        # Don't built the tools
+QT_CFG+=' -no-c++11'            # Build fails on mac right now with C++11
 
 # Unnecessary Qt modules
 QT_CFG+=' -no-opengl'
@@ -30,6 +28,7 @@ QT_CFG+=' -no-opengl'
 # Unnecessary Qt features
 QT_CFG+=' -D QT_NO_GRAPHICSVIEW'
 QT_CFG+=' -D QT_NO_GRAPHICSEFFECT'
+QT_CFG+=' -no-qml-debug'
 
 # Unix
 QT_CFG+=' -no-dbus'             # Disable D-Bus feature
@@ -42,6 +41,13 @@ QT_CFG+=' -no-xkb'
 QT_CFG+=' -no-xcb'
 QT_CFG+=' -icu'
 QT_CFG+=' -no-pkg-config'
+QT_CFG+=' -no-kms'
+QT_CFG+=' -no-linuxfb'
+QT_CFG+=' -no-directfb'
+QT_CFG+=' -no-mtdev'
+QT_CFG+=' -no-libudev'
+QT_CFG+=' -no-egl'
+QT_CFG+=' -no-evdev'
 
 # Use the bundled libraries, vs system-installed
 QT_CFG+=' -qt-libjpeg'
