@@ -177,7 +177,6 @@ signals:
 
 private slots:
     void printConsoleMessage(const QString &msg);
-    void printErrorMessage(const QString &msg, int lineNumber, const QString &sourceID, const QString &stack);
 
     void onInitialized();
 
