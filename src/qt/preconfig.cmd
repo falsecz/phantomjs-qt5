@@ -1,14 +1,12 @@
 @echo off
 SETLOCAL EnableExtensions EnableDelayedExpansion
 
-set BUILD_TYPE=%1
-
 :: Build Qt5
 pushd qtbase
 
 set QT_CONFIG=
 
-set QT_CONFIG=!QT_CONFIG! -!BUILD_TYPE!
+set QT_CONFIG=!QT_CONFIG! -%BUILD_TYPE%
 set QT_CONFIG=!QT_CONFIG! -static
 set QT_CONFIG=!QT_CONFIG! -opensource
 set QT_CONFIG=!QT_CONFIG! -confirm-license
@@ -28,6 +26,6 @@ set QT_CONFIG=!QT_CONFIG! -openssl-linked
 
 configure !QT_CONFIG!
 
-!MAKE_TOOL! !BUILD_TYPE!
+%MAKE_TOOL% %BUILD_TYPE%
 
 popd
