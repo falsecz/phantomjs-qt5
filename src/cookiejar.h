@@ -57,6 +57,7 @@ public:
 
     QNetworkCookie cookie(const QString &name, const QString &url = QString()) const;
 
+    using QNetworkCookieJar::deleteCookie;
     bool deleteCookies(const QString &url = QString());
 
     void enable();
