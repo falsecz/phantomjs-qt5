@@ -18,7 +18,7 @@ set INCLUDE=%ROOT_SRC_DIR%\src\qt\3rdparty\libicu\include;%INCLUDE%
 
 :: libxml
 set LIB=%ROOT_SRC_DIR%\src\qt\3rdparty\libxml\lib;%LIB%
-set INCLUDE=%ROOT_SRC_DIR%\src\qt\3rdparty\libxml\include\libxml2;%INCLUDE%
+set INCLUDE=%ROOT_SRC_DIR%\src\qt\3rdparty\libxml\include;%INCLUDE%
 
 :: sqlite
 set SQLITE3SRCDIR=%ROOT_SRC_DIR%\src\qt\qtbase\src\3rdparty\sqlite
