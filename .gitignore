@@ -54,9 +54,6 @@ tools/dump_syms.app/
 # Build results
 [Dd]ebug*/
 [Rr]elease/
-
-/bin/*
-
-src/qt/3rdparty
 bin/
-phantomjs_plugin_import.cpp
+*.class
+build/
