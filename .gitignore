@@ -58,3 +58,5 @@ bin/
 *.class
 build/
 .gradle/
+.qmake.stash
+phantomjs_plugin_import.cpp
