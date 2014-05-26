@@ -25,40 +25,40 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-var ghostdriver = ghostdriver || {};
+package ghostdriver;
 
-ghostdriver.StatusReqHand = function() {
-    // private:
-    const
-    _statusObj = {
-        "build" : {
-            "version"   : ghostdriver.version
-        },
-        "os" : {
-            "name"      : ghostdriver.system.os.name,
-            "version"   : ghostdriver.system.os.version,
-            "arch"      : ghostdriver.system.os.architecture
-        }
-    };
+import static org.junit.Assert.assertTrue;
 
-    var
-    _protoParent = ghostdriver.StatusReqHand.prototype,
+import org.junit.Test;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.phantomjs.PhantomJSDriverService;
 
-    _handle = function(req, res) {
-        _protoParent.handle.call(this, req, res);
+public class AuthBasicTest extends BaseTest {
 
-        if (req.method === "GET" && req.urlParsed.file === "status") {
-            res.success(null, _statusObj);
-            return;
-        }
+    // credentials for testing, no one would ever use these
+    private final static String userName = "admin";
+    private final static String password = "admin";
 
-        throw _protoParent.errors.createInvalidReqInvalidCommandMethodEH(req);
-    };
+    @Override
+    public void prepareDriver() throws Exception {
+        sCaps.setCapability(PhantomJSDriverService.PHANTOMJS_PAGE_SETTINGS_PREFIX + "userName", userName);
+        sCaps.setCapability(PhantomJSDriverService.PHANTOMJS_PAGE_SETTINGS_PREFIX + "password", password);
 
-    // public:
-    return {
-        handle : _handle
-    };
-};
-// prototype inheritance:
-ghostdriver.StatusReqHand.prototype = new ghostdriver.RequestHandler();
+        super.prepareDriver();
+    }
+
+    @Test
+    public void simpleBasicAuthShouldWork() {
+        // Get Driver Instance
+        WebDriver driver = getDriver();
+
+        // wrong password
+        driver.get(String.format("http://httpbin.org/basic-auth/%s/Wrong%s", userName, password));
+        assertTrue(!driver.getPageSource().contains("authenticated"));
+
+        // we should be authorized
+        driver.get(String.format("http://httpbin.org/basic-auth/%s/%s", userName, password));
+        assertTrue(driver.getPageSource().contains("authenticated"));
+    }
+
+}

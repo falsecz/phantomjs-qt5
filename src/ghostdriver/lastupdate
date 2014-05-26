@@ -1,7 +1,7 @@
-2014-02-12 23:42:59
+2014-05-26 08:46:33
 
-commit 2af7099a9f5cf683ff565617be38b70318c9203f (HEAD, refs/remotes/origin/master, refs/remotes/origin/HEAD, refs/heads/master)
+commit 54afa3f01e487e4c48f3d9ae9e9ec352eec9a3c2 (HEAD, refs/remotes/origin/master, refs/remotes/origin/HEAD, refs/heads/master)
 Author: Ivan De Marino <detronizator@gmail.com>
-Date:   Wed Feb 12 23:42:43 2014 +0000
+Date:   Fri May 23 21:36:07 2014 +0100
 
-    Removing flaky (and pointless) test
+    Adding commented line useful during testing with PhantomJS 2 (Qt5)
