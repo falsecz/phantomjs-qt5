@@ -165,7 +165,7 @@ QProcessEnvironment QProcessEnvironmentPrivate::fromList(const QStringList &list
     QStringList::ConstIterator it = list.constBegin(),
                               end = list.constEnd();
     for ( ; it != end; ++it) {
-        int pos = it->indexOf(QLatin1Char('='));
+        int pos = it->indexOf(QLatin1Char('='), 1);
         if (pos < 1)
             continue;
 
@@ -1545,14 +1545,38 @@ void QProcess::setWorkingDirectory(const QString &dir)
     d->workingDirectory = dir;
 }
 
+
 /*!
+    \deprecated
+    Use processId() instead.
+
     Returns the native process identifier for the running process, if
-    available.  If no process is currently running, 0 is returned.
+    available.  If no process is currently running, \c 0 is returned.
+
+    \note Unlike \l processId(), pid() returns an integer on Unix and a pointer on Windows.
+
+    \sa Q_PID, processId()
 */
-Q_PID QProcess::pid() const
+Q_PID QProcess::pid() const // ### Qt 6 remove or rename this method to processInformation()
 {
     Q_D(const QProcess);
     return d->pid;
+}
+
+/*!
+    \since 5.3
+
+    Returns the native process identifier for the running process, if
+    available. If no process is currently running, \c 0 is returned.
+ */
+qint64 QProcess::processId() const
+{
+    Q_D(const QProcess);
+#ifdef Q_OS_WIN
+    return d->pid ? d->pid->dwProcessId : 0;
+#else
+    return d->pid;
+#endif
 }
 
 /*! \reimp
@@ -2203,6 +2227,8 @@ void QProcess::start(const QString &command, OpenMode mode)
 }
 
 /*!
+    \since 5.0
+
     Returns the program the process was last started with.
 
     \sa start()
@@ -2232,6 +2258,8 @@ void QProcess::setProgram(const QString &program)
 }
 
 /*!
+    \since 5.0
+
     Returns the command line arguments the process was last started with.
 
     \sa start()

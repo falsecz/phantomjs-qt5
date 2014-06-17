@@ -75,7 +75,6 @@
 QT_BEGIN_NAMESPACE
 
 QMenu *QMenuPrivate::mouseDown = 0;
-int QMenuPrivate::sloppyDelayTimer = 0;
 
 /* QMenu code */
 // internal class used for the torn off popup
@@ -153,11 +152,46 @@ void QMenuPrivate::init()
         scroll->scrollFlags = QMenuPrivate::QMenuScroller::ScrollNone;
     }
 
-    platformMenu = QGuiApplicationPrivate::platformTheme()->createPlatformMenu();
+    setPlatformMenu(QGuiApplicationPrivate::platformTheme()->createPlatformMenu());
+}
+
+void QMenuPrivate::setPlatformMenu(QPlatformMenu *menu)
+{
+    Q_Q(QMenu);
+    if (!platformMenu.isNull() && !platformMenu->parent())
+        delete platformMenu.data();
+
+    platformMenu = menu;
     if (!platformMenu.isNull()) {
         QObject::connect(platformMenu, SIGNAL(aboutToShow()), q, SIGNAL(aboutToShow()));
         QObject::connect(platformMenu, SIGNAL(aboutToHide()), q, SIGNAL(aboutToHide()));
     }
+}
+
+// forward declare function
+static void copyActionToPlatformItem(const QAction *action, QPlatformMenuItem* item);
+
+void QMenuPrivate::syncPlatformMenu()
+{
+    Q_Q(QMenu);
+    if (platformMenu.isNull())
+        return;
+
+    QPlatformMenuItem *beforeItem = Q_NULLPTR;
+    QListIterator<QAction*> it(q->actions());
+    it.toBack();
+    while (it.hasPrevious()) {
+        QPlatformMenuItem *menuItem = platformMenu->createMenuItem();
+        QAction *action = it.previous();
+        menuItem->setTag(reinterpret_cast<quintptr>(action));
+        QObject::connect(menuItem, SIGNAL(activated()), action, SLOT(trigger()));
+        QObject::connect(menuItem, SIGNAL(hovered()), action, SIGNAL(hovered()));
+        copyActionToPlatformItem(action, menuItem);
+        platformMenu->insertMenuItem(menuItem, beforeItem);
+        beforeItem = menuItem;
+    }
+    platformMenu->syncSeparatorsCollapsible(collapsibleSeparators);
+    platformMenu->setEnabled(q->isEnabled());
 }
 
 int QMenuPrivate::scrollerHeight() const
@@ -397,10 +431,6 @@ QRect QMenuPrivate::actionRect(QAction *act) const
     //we found the action
     return actionRects.at(index);
 }
-
-#if defined(Q_OS_MAC)
-static const qreal MenuFadeTimeInSec = 0.150;
-#endif
 
 void QMenuPrivate::hideUpToMenuBar()
 {
@@ -2856,6 +2886,7 @@ void QMenu::mouseMoveEvent(QMouseEvent *e)
     QAction *action = d->actionAt(e->pos());
     if (!action || action->isSeparator()) {
         if (d->hasHadMouse
+            && d->sloppyDelayTimer == 0 // Keep things as they are while we're moving to the submenu
             && (!d->currentAction || (action && action->isSeparator())
                 || !(d->currentAction->menu() && d->currentAction->menu()->isVisible())))
             d->setCurrentAction(0);
@@ -2865,13 +2896,13 @@ void QMenu::mouseMoveEvent(QMouseEvent *e)
     }
     if (d->sloppyRegion.contains(e->pos())) {
         // If the timer is already running then don't start a new one unless the action is the same
-        if (d->sloppyAction != action && QMenuPrivate::sloppyDelayTimer != 0) {
-            killTimer(QMenuPrivate::sloppyDelayTimer);
-            QMenuPrivate::sloppyDelayTimer = 0;
+        if (d->sloppyAction != action && d->sloppyDelayTimer != 0) {
+            killTimer(d->sloppyDelayTimer);
+            d->sloppyDelayTimer = 0;
         }
-        if (QMenuPrivate::sloppyDelayTimer == 0) {
+        if (d->sloppyDelayTimer == 0) {
             d->sloppyAction = action;
-            QMenuPrivate::sloppyDelayTimer = startTimer(style()->styleHint(QStyle::SH_Menu_SubMenuPopupDelay, 0, this) * 6);
+            d->sloppyDelayTimer = startTimer(style()->styleHint(QStyle::SH_Menu_SubMenuPopupDelay, 0, this) * 6);
         }
     } else if (action != d->currentAction) {
         d->setCurrentAction(action, style()->styleHint(QStyle::SH_Menu_SubMenuPopupDelay, 0, this));
@@ -2913,9 +2944,9 @@ QMenu::timerEvent(QTimerEvent *e)
     } else if(d->menuDelayTimer.timerId() == e->timerId()) {
         d->menuDelayTimer.stop();
         internalDelayedPopup();
-    } else if(QMenuPrivate::sloppyDelayTimer == e->timerId()) {
-        killTimer(QMenuPrivate::sloppyDelayTimer);
-        QMenuPrivate::sloppyDelayTimer = 0;
+    } else if (d->sloppyDelayTimer == e->timerId()) {
+        killTimer(d->sloppyDelayTimer);
+        d->sloppyDelayTimer = 0;
         internalSetSloppyAction();
     } else if(d->searchBufferTimer.timerId() == e->timerId()) {
         d->searchBuffer.clear();
@@ -2976,8 +3007,7 @@ void QMenu::actionEvent(QActionEvent *e)
 
     if (!d->platformMenu.isNull()) {
         if (e->type() == QEvent::ActionAdded) {
-            QPlatformMenuItem *menuItem =
-                QGuiApplicationPrivate::platformTheme()->createPlatformMenuItem();
+            QPlatformMenuItem *menuItem = d->platformMenu->createMenuItem();
             menuItem->setTag(reinterpret_cast<quintptr>(e->action()));
             QObject::connect(menuItem, SIGNAL(activated()), e->action(), SLOT(trigger()));
             QObject::connect(menuItem, SIGNAL(hovered()), e->action(), SIGNAL(hovered()));
@@ -3139,11 +3169,7 @@ void QMenu::internalDelayedPopup()
 */
 void QMenu::setNoReplayFor(QWidget *noReplayFor)
 {
-#ifdef Q_OS_WIN
     d_func()->noReplayFor = noReplayFor;
-#else
-    Q_UNUSED(noReplayFor);
-#endif
 }
 
 /*!\internal
@@ -3152,6 +3178,14 @@ QPlatformMenu *QMenu::platformMenu()
 {
 
     return d_func()->platformMenu;
+}
+
+/*!\internal
+*/
+void QMenu::setPlatformMenu(QPlatformMenu *platformMenu)
+{
+    d_func()->setPlatformMenu(platformMenu);
+    d_func()->syncPlatformMenu();
 }
 
 /*!

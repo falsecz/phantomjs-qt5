@@ -1508,19 +1508,17 @@ void QMainWindow::setUnifiedTitleAndToolBarOnMac(bool set)
 #ifdef Q_OS_OSX
     Q_D(QMainWindow);
     if (isWindow()) {
+        d->useUnifiedToolBar = set;
+        createWinId();
+
         QPlatformNativeInterface *nativeInterface = QGuiApplication::platformNativeInterface();
         QPlatformNativeInterface::NativeResourceForIntegrationFunction function =
-            nativeInterface->nativeResourceFunctionForIntegration("setContentBorderThickness");
+            nativeInterface->nativeResourceFunctionForIntegration("setContentBorderEnabled");
         if (!function)
             return; // Not Cocoa platform plugin.
 
-        createWinId();
-
-        d->useUnifiedToolBar = set;
-
-        const int toolBarHeight = 50;
-        typedef void (*SetContentBorderThicknessFunction)(QWindow *window, int topThickness, int bottomThickness);
-        (reinterpret_cast<SetContentBorderThicknessFunction>(function))(window()->windowHandle(), toolBarHeight, 0);
+        typedef void (*SetContentBorderEnabledFunction)(QWindow *window, bool enable);
+        (reinterpret_cast<SetContentBorderEnabledFunction>(function))(window()->windowHandle(), set);
     }
 #endif
 

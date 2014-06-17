@@ -44,7 +44,6 @@
 #include "qcocoawindow.h"
 #include "qcocoamenu.h"
 #include "qcocoamenubar.h"
-#include "qmacmime.h"
 #include "qcocoahelpers.h"
 #include "qcocoaapplication.h"
 #include "qcocoaintegration.h"
@@ -94,6 +93,7 @@ void *QCocoaNativeInterface::nativeResourceForWindow(const QByteArray &resourceS
     if (!window->handle())
         return 0;
 
+    
     if (resourceString == "nsview") {
         return static_cast<QCocoaWindow *>(window->handle())->m_contentView;
 #ifndef QT_NO_OPENGL
@@ -132,8 +132,16 @@ QPlatformNativeInterface::NativeResourceForIntegrationFunction QCocoaNativeInter
         return NativeResourceForIntegrationFunction(QCocoaNativeInterface::setEmbeddedInForeignView);
     if (resource.toLower() == "setcontentborderthickness")
         return NativeResourceForIntegrationFunction(QCocoaNativeInterface::setContentBorderThickness);
+    if (resource.toLower() == "registercontentborderarea")
+        return NativeResourceForIntegrationFunction(QCocoaNativeInterface::registerContentBorderArea);
+    if (resource.toLower() == "setcontentborderareaenabled")
+        return NativeResourceForIntegrationFunction(QCocoaNativeInterface::setContentBorderAreaEnabled);
+    if (resource.toLower() == "setcontentborderenabled")
+        return NativeResourceForIntegrationFunction(QCocoaNativeInterface::setContentBorderEnabled);
     if (resource.toLower() == "setnstoolbar")
         return NativeResourceForIntegrationFunction(QCocoaNativeInterface::setNSToolbar);
+    if (resource.toLower() == "testcontentborderposition")
+        return NativeResourceForIntegrationFunction(QCocoaNativeInterface::testContentBorderPosition);
 
     return 0;
 }
@@ -205,6 +213,7 @@ void *QCocoaNativeInterface::cglContextForContext(QOpenGLContext* context)
         return [nsOpenGLContext CGLContextObj];
     return 0;
 }
+#endif
 
 void *QCocoaNativeInterface::nsOpenGLContextForContext(QOpenGLContext* context)
 {
@@ -216,7 +225,6 @@ void *QCocoaNativeInterface::nsOpenGLContextForContext(QOpenGLContext* context)
     }
     return 0;
 }
-#endif
 
 void QCocoaNativeInterface::addToMimeList(void *macPasteboardMime)
 {
@@ -256,7 +264,7 @@ void *QCocoaNativeInterface::qMenuBarToNSMenu(QPlatformMenuBar *platformMenuBar)
 
 CGImageRef QCocoaNativeInterface::qImageToCGImage(const QImage &image)
 {
-    return qt_mac_toCGImage(image, false, 0);
+    return qt_mac_toCGImage(image);
 }
 
 QImage QCocoaNativeInterface::cgImageToQImage(CGImageRef image)
@@ -296,16 +304,54 @@ void QCocoaNativeInterface::setContentBorderThickness(QWindow *window, int topTh
         cocoaWindow->setContentBorderThickness(topThickness, bottomThickness);
 }
 
-void QCocoaNativeInterface::setNSToolbar(QWindow *window, void *nsToolbar)
+void QCocoaNativeInterface::registerContentBorderArea(QWindow *window, quintptr identifier, int upper, int lower)
 {
     if (!window)
         return;
 
+    QCocoaWindow *cocoaWindow = static_cast<QCocoaWindow *>(window->handle());
+    if (cocoaWindow)
+        cocoaWindow->registerContentBorderArea(identifier, upper, lower);
+}
+
+void QCocoaNativeInterface::setContentBorderAreaEnabled(QWindow *window, quintptr identifier, bool enable)
+{
+    if (!window)
+        return;
+
+    QCocoaWindow *cocoaWindow = static_cast<QCocoaWindow *>(window->handle());
+    if (cocoaWindow)
+        cocoaWindow->setContentBorderAreaEnabled(identifier, enable);
+}
+
+void QCocoaNativeInterface::setContentBorderEnabled(QWindow *window, bool enable)
+{
+    if (!window)
+        return;
+
+    QCocoaWindow *cocoaWindow = static_cast<QCocoaWindow *>(window->handle());
+    if (cocoaWindow)
+        cocoaWindow->setContentBorderEnabled(enable);
+}
+
+void QCocoaNativeInterface::setNSToolbar(QWindow *window, void *nsToolbar)
+{
     QCocoaIntegration::instance()->setToolbar(window, static_cast<NSToolbar *>(nsToolbar));
 
     QCocoaWindow *cocoaWindow = static_cast<QCocoaWindow *>(window->handle());
     if (cocoaWindow)
         cocoaWindow->updateNSToolbar();
+}
+
+bool QCocoaNativeInterface::testContentBorderPosition(QWindow *window, int position)
+{
+    if (!window)
+        return false;
+
+    QCocoaWindow *cocoaWindow = static_cast<QCocoaWindow *>(window->handle());
+    if (cocoaWindow)
+        return cocoaWindow->testContentBorderAreaPosition(position);
+    return false;
 }
 
 QT_END_NAMESPACE

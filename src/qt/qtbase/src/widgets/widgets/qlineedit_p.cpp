@@ -95,7 +95,12 @@ void QLineEditPrivate::_q_completionHighlighted(QString newText)
         QString text = control->text();
         q->setText(text.left(c) + newText.mid(c));
         control->moveCursor(control->end(), false);
-        control->moveCursor(c, true);
+#ifndef Q_OS_ANDROID
+        const bool mark = true;
+#else
+        const bool mark = (imHints & Qt::ImhNoPredictiveText);
+#endif
+        control->moveCursor(c, mark);
     }
 }
 
@@ -304,9 +309,7 @@ QLineEditIconButton::QLineEditIconButton(QWidget *parent)
     : QToolButton(parent)
     , m_opacity(0)
 {
-#ifndef QT_NO_CURSOR
-    setCursor(Qt::ArrowCursor);
-#endif
+    updateCursor();
     setFocusPolicy(Qt::NoFocus);
 }
 
@@ -337,9 +340,17 @@ void QLineEditIconButton::setOpacity(qreal value)
 void QLineEditIconButton::startOpacityAnimation(qreal endValue)
 {
     QPropertyAnimation *animation = new QPropertyAnimation(this, QByteArrayLiteral("opacity"));
+    connect(animation, &QAbstractAnimation::finished, this, &QLineEditIconButton::updateCursor);
     animation->setDuration(160);
     animation->setEndValue(endValue);
     animation->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void QLineEditIconButton::updateCursor()
+{
+#ifndef QT_NO_CURSOR
+    setCursor(qFuzzyCompare(m_opacity, 1.0) || !parentWidget() ? QCursor(Qt::ArrowCursor) : parentWidget()->cursor());
+#endif
 }
 
 void QLineEditPrivate::_q_textChanged(const QString &text)

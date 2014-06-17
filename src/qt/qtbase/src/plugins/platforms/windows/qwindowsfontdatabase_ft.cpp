@@ -336,8 +336,8 @@ static QByteArray getFntTable(HFONT hfont, uint tag)
 }
 #endif
 
-static int CALLBACK storeFont(ENUMLOGFONTEX* f, NEWTEXTMETRICEX *textmetric,
-                              int type, LPARAM namesSetIn)
+static int QT_WIN_CALLBACK storeFont(ENUMLOGFONTEX* f, NEWTEXTMETRICEX *textmetric,
+                                     int type, LPARAM namesSetIn)
 {
     typedef QSet<QString> StringSet;
     const QString familyName = QString::fromWCharArray(f->elfLogFont.lfFaceName)
@@ -477,8 +477,7 @@ QStringList QWindowsFontDatabaseFT::fallbacksForFamily(const QString &family, QF
     }
 #endif
 
-    if (script == QChar::Script_Common || script == QChar::Script_Han)
-        result.append(QWindowsFontDatabase::extraTryFontsForFamily(family));
+    result.append(QWindowsFontDatabase::extraTryFontsForFamily(family));
 
     qCDebug(lcQpaFonts) << __FUNCTION__ << family << style << styleHint
         << script << result << m_families;

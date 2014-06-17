@@ -134,7 +134,6 @@ void QXcbConnection::initializeXInput2()
 #ifdef XCB_USE_XINPUT21
                     case XIScrollClass: {
                         XIScrollClassInfo *sci = reinterpret_cast<XIScrollClassInfo *>(devices[i].classes[c]);
-                        scrollingDevice.deviceId = devices[i].deviceid;
                         if (sci->scroll_type == XIScrollTypeVertical) {
                             scrollingDevice.orientations |= Qt::Vertical;
                             scrollingDevice.verticalIndex = sci->number;
@@ -144,6 +143,22 @@ void QXcbConnection::initializeXInput2()
                             scrollingDevice.orientations |= Qt::Horizontal;
                             scrollingDevice.horizontalIndex = sci->number;
                             scrollingDevice.horizontalIncrement = sci->increment;
+                        }
+                        break;
+                    }
+                    case XIButtonClass: {
+                        XIButtonClassInfo *bci = reinterpret_cast<XIButtonClassInfo *>(devices[i].classes[c]);
+                        if (bci->num_buttons >= 5) {
+                            Atom label4 = bci->labels[3];
+                            Atom label5 = bci->labels[4];
+                            if ((!label4 || qatom(label4) == QXcbAtom::ButtonWheelUp) && (!label5 || qatom(label5) == QXcbAtom::ButtonWheelDown))
+                                scrollingDevice.legacyOrientations |= Qt::Vertical;
+                        }
+                        if (bci->num_buttons >= 7) {
+                            Atom label6 = bci->labels[5];
+                            Atom label7 = bci->labels[6];
+                            if ((!label6 || qatom(label6) == QXcbAtom::ButtonHorizWheelLeft) && (!label7 || qatom(label7) == QXcbAtom::ButtonHorizWheelRight))
+                                scrollingDevice.legacyOrientations |= Qt::Horizontal;
                         }
                         break;
                     }
@@ -170,7 +185,10 @@ void QXcbConnection::initializeXInput2()
 #endif // QT_NO_TABLETEVENT
 
 #ifdef XCB_USE_XINPUT21
-                if (scrollingDevice.orientations) {
+                if (scrollingDevice.orientations || scrollingDevice.legacyOrientations) {
+                    scrollingDevice.deviceId = devices[i].deviceid;
+                    // Only use legacy wheel button events when we don't have real scroll valuators.
+                    scrollingDevice.legacyOrientations &= ~scrollingDevice.orientations;
                     m_scrollingDevices.insert(scrollingDevice.deviceId, scrollingDevice);
                     if (Q_UNLIKELY(debug_xinput_devices))
                         qDebug() << "   it's a scrolling device";
@@ -230,6 +248,7 @@ void QXcbConnection::xi2Select(xcb_window_t window)
     }
 #endif // XCB_USE_XINPUT22
 
+    QSet<int> tabletDevices;
 #ifndef QT_NO_TABLETEVENT
     // For each tablet, select some additional event types.
     // Press, motion, etc. events must never be selected for _all_ devices
@@ -237,15 +256,19 @@ void QXcbConnection::xi2Select(xcb_window_t window)
     // similar handlers useless and we have no intention to infect
     // all the pure xcb code with Xlib-based XI2.
     if (!m_tabletData.isEmpty()) {
+        unsigned int tabletBitMask = bitMask;
+        unsigned char *xiTabletBitMask = reinterpret_cast<unsigned char *>(&tabletBitMask);
         QVector<XIEventMask> xiEventMask(m_tabletData.count());
-        bitMask |= XI_ButtonPressMask;
-        bitMask |= XI_ButtonReleaseMask;
-        bitMask |= XI_MotionMask;
-        bitMask |= XI_PropertyEventMask;
+        tabletBitMask |= XI_ButtonPressMask;
+        tabletBitMask |= XI_ButtonReleaseMask;
+        tabletBitMask |= XI_MotionMask;
+        tabletBitMask |= XI_PropertyEventMask;
         for (int i = 0; i < m_tabletData.count(); ++i) {
-            xiEventMask[i].deviceid = m_tabletData.at(i).deviceId;
-            xiEventMask[i].mask_len = sizeof(bitMask);
-            xiEventMask[i].mask = xiBitMask;
+            int deviceId = m_tabletData.at(i).deviceId;
+            tabletDevices.insert(deviceId);
+            xiEventMask[i].deviceid = deviceId;
+            xiEventMask[i].mask_len = sizeof(tabletBitMask);
+            xiEventMask[i].mask = xiTabletBitMask;
         }
         XISelectEvents(xDisplay, window, xiEventMask.data(), m_tabletData.count());
     }
@@ -255,16 +278,30 @@ void QXcbConnection::xi2Select(xcb_window_t window)
     // Enable each scroll device
     if (!m_scrollingDevices.isEmpty()) {
         QVector<XIEventMask> xiEventMask(m_scrollingDevices.size());
-        bitMask = XI_MotionMask;
+        unsigned int scrollBitMask = 0;
+        unsigned char *xiScrollBitMask = reinterpret_cast<unsigned char *>(&scrollBitMask);
+        scrollBitMask = XI_MotionMask;
+        scrollBitMask |= XI_ButtonReleaseMask;
+        bitMask |= XI_MotionMask;
+        bitMask |= XI_ButtonReleaseMask;
         int i=0;
         Q_FOREACH (const ScrollingDevice& scrollingDevice, m_scrollingDevices) {
+            if (tabletDevices.contains(scrollingDevice.deviceId))
+                continue; // All necessary events are already captured.
             xiEventMask[i].deviceid = scrollingDevice.deviceId;
-            xiEventMask[i].mask_len = sizeof(bitMask);
-            xiEventMask[i].mask = xiBitMask;
+            if (m_touchDevices.contains(scrollingDevice.deviceId)) {
+                xiEventMask[i].mask_len = sizeof(bitMask);
+                xiEventMask[i].mask = xiBitMask;
+            } else {
+                xiEventMask[i].mask_len = sizeof(scrollBitMask);
+                xiEventMask[i].mask = xiScrollBitMask;
+            }
             i++;
         }
-        XISelectEvents(xDisplay, window, xiEventMask.data(), m_scrollingDevices.size());
+        XISelectEvents(xDisplay, window, xiEventMask.data(), i);
     }
+#else
+    Q_UNUSED(xiBitMask);
 #endif
 }
 
@@ -524,12 +561,41 @@ void QXcbConnection::xi2HandleEvent(xcb_ge_event_t *event)
     }
 }
 
+void QXcbConnection::handleEnterEvent(const xcb_enter_notify_event_t *)
+{
+#ifdef XCB_USE_XINPUT21
+    QHash<int, ScrollingDevice>::iterator it = m_scrollingDevices.begin();
+    const QHash<int, ScrollingDevice>::iterator end = m_scrollingDevices.end();
+    while (it != end) {
+        ScrollingDevice& scrollingDevice = it.value();
+        int nrDevices = 0;
+        XIDeviceInfo* xiDeviceInfo = XIQueryDevice(static_cast<Display *>(m_xlib_display), scrollingDevice.deviceId, &nrDevices);
+        if (nrDevices <= 0) {
+            it = m_scrollingDevices.erase(it);
+            continue;
+        }
+        for (int c = 0; c < xiDeviceInfo->num_classes; ++c) {
+            if (xiDeviceInfo->classes[c]->type == XIValuatorClass) {
+                XIValuatorClassInfo *vci = reinterpret_cast<XIValuatorClassInfo *>(xiDeviceInfo->classes[c]);
+                const int valuatorAtom = qatom(vci->label);
+                if (valuatorAtom == QXcbAtom::RelHorizScroll || valuatorAtom == QXcbAtom::RelHorizWheel)
+                    scrollingDevice.lastScrollPosition.setX(vci->value);
+                else if (valuatorAtom == QXcbAtom::RelVertScroll || valuatorAtom == QXcbAtom::RelVertWheel)
+                    scrollingDevice.lastScrollPosition.setY(vci->value);
+            }
+        }
+        XIFreeDeviceInfo(xiDeviceInfo);
+        ++it;
+    }
+#endif
+}
+
 void QXcbConnection::xi2HandleScrollEvent(void *event, ScrollingDevice &scrollingDevice)
 {
 #ifdef XCB_USE_XINPUT21
     xXIGenericDeviceEvent *xiEvent = reinterpret_cast<xXIGenericDeviceEvent *>(event);
 
-    if (xiEvent->evtype == XI_Motion) {
+    if (xiEvent->evtype == XI_Motion && scrollingDevice.orientations) {
         xXIDeviceEvent* xiDeviceEvent = reinterpret_cast<xXIDeviceEvent *>(event);
         if (QXcbWindow *platformWindow = platformWindowFromId(xiDeviceEvent->event)) {
             QPoint rawDelta;
@@ -566,6 +632,31 @@ void QXcbConnection::xi2HandleScrollEvent(void *event, ScrollingDevice &scrollin
                 QWindowSystemInterface::handleWheelEvent(platformWindow->window(), xiEvent->time, local, global, rawDelta, angleDelta, modifiers);
             }
         }
+    } else if (xiEvent->evtype == XI_ButtonRelease && scrollingDevice.legacyOrientations) {
+        xXIDeviceEvent* xiDeviceEvent = reinterpret_cast<xXIDeviceEvent *>(event);
+        if (QXcbWindow *platformWindow = platformWindowFromId(xiDeviceEvent->event)) {
+            QPoint angleDelta;
+            if (scrollingDevice.legacyOrientations & Qt::Vertical) {
+                if (xiDeviceEvent->detail == 4)
+                    angleDelta.setY(120);
+                else if (xiDeviceEvent->detail == 5)
+                    angleDelta.setY(-120);
+            }
+            if (scrollingDevice.legacyOrientations & Qt::Horizontal) {
+                if (xiDeviceEvent->detail == 6)
+                    angleDelta.setX(120);
+                else if (xiDeviceEvent->detail == 7)
+                    angleDelta.setX(-120);
+            }
+            if (!angleDelta.isNull()) {
+                QPoint local(fixed1616ToReal(xiDeviceEvent->event_x), fixed1616ToReal(xiDeviceEvent->event_y));
+                QPoint global(fixed1616ToReal(xiDeviceEvent->root_x), fixed1616ToReal(xiDeviceEvent->root_y));
+                Qt::KeyboardModifiers modifiers = keyboard()->translateModifiers(xiDeviceEvent->mods.effective_mods);
+                if (modifiers & Qt::AltModifier)
+                    std::swap(angleDelta.rx(), angleDelta.ry());
+                QWindowSystemInterface::handleWheelEvent(platformWindow->window(), xiEvent->time, local, global, QPoint(), angleDelta, modifiers);
+            }
+        }
     }
 #else
     Q_UNUSED(event);
@@ -584,13 +675,15 @@ bool QXcbConnection::xi2HandleTabletEvent(void *event, TabletData *tabletData)
         if (reinterpret_cast<xXIDeviceEvent *>(event)->detail == 1) { // ignore the physical buttons on the stylus
             tabletData->down = true;
             xi2ReportTabletEvent(*tabletData, xiEvent);
-        }
+        } else
+            handled = false;
         break;
     case XI_ButtonRelease: // stylus up
         if (reinterpret_cast<xXIDeviceEvent *>(event)->detail == 1) {
             tabletData->down = false;
             xi2ReportTabletEvent(*tabletData, xiEvent);
-        }
+        } else
+            handled = false;
         break;
     case XI_Motion:
         // Report TabletMove only when the stylus is touching the tablet.

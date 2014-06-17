@@ -58,7 +58,10 @@
 #if !defined(QT_BUILD_QMAKE) && !defined(QT_BUILD_CONFIGURE)
 #include <QtCore/qconfig.h>
 #include <QtCore/qfeatures.h>
+#endif
 #define QT_SUPPORTS(FEATURE) (!defined(QT_NO_##FEATURE))
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+#  define QT_NO_UNSHARABLE_CONTAINERS
 #endif
 
 /* These two macros makes it possible to turn the builtin line expander into a
@@ -534,8 +537,8 @@ Q_DECL_CONSTEXPR inline const T &qBound(const T &min, const T &val, const T &max
 
 #ifdef Q_OS_DARWIN
 #  define QT_MAC_PLATFORM_SDK_EQUAL_OR_ABOVE(osx, ios) \
-    ((defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= osx) || \
-     (defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= ios))
+    ((defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && osx != __MAC_NA && __MAC_OS_X_VERSION_MAX_ALLOWED >= osx) || \
+     (defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && ios != __IPHONE_NA && __IPHONE_OS_VERSION_MAX_ALLOWED >= ios))
 
 #  define QT_MAC_DEPLOYMENT_TARGET_BELOW(osx, ios) \
     ((defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && osx != __MAC_NA && __MAC_OS_X_VERSION_MIN_REQUIRED < osx) || \
@@ -870,7 +873,7 @@ public:
 };
 
 #define Q_FOREACH(variable, container)                                \
-for (QForeachContainer<__typeof__(container)> _container_(container); \
+for (QForeachContainer<__typeof__((container))> _container_((container)); \
      !_container_.brk && _container_.i != _container_.e;              \
      __extension__  ({ ++_container_.brk; ++_container_.i; }))                       \
     for (variable = *_container_.i;; __extension__ ({--_container_.brk; break;}))
@@ -881,8 +884,11 @@ struct QForeachContainerBase {};
 
 template <typename T>
 class QForeachContainer : public QForeachContainerBase {
+    QForeachContainer &operator=(const QForeachContainer &) Q_DECL_EQ_DELETE;
 public:
     inline QForeachContainer(const T& t): c(t), brk(0), i(c.begin()), e(c.end()){}
+    QForeachContainer(const QForeachContainer &other)
+        : c(other.c), brk(other.brk), i(other.i), e(other.e) {}
     const T c;
     mutable int brk;
     mutable typename T::const_iterator i, e;
@@ -977,7 +983,7 @@ Q_CORE_EXPORT QString qtTrId(const char *id, int n = -1);
    dynamic_cast to cause a compile failure.
 */
 
-#ifdef QT_NO_DYNAMIC_CAST
+#if defined(QT_NO_DYNAMIC_CAST) && !defined(dynamic_cast)
 #  define dynamic_cast QT_PREPEND_NAMESPACE(qt_dynamic_cast_check)
 
   template<typename T, typename X>
@@ -1029,6 +1035,9 @@ namespace QtPrivate {
 //like std::enable_if
 template <bool B, typename T = void> struct QEnableIf;
 template <typename T> struct QEnableIf<true, T> { typedef T Type; };
+
+template <bool B, typename T, typename F> struct QConditional { typedef T Type; };
+template <typename T, typename F> struct QConditional<false, T, F> { typedef F Type; };
 }
 
 #ifndef Q_FORWARD_DECLARE_OBJC_CLASS
@@ -1057,6 +1066,7 @@ QT_END_NAMESPACE
 
 #include <QtCore/qatomic.h>
 #include <QtCore/qglobalstatic.h>
+#include <QtCore/qnumeric.h>
 
 #endif /* __cplusplus */
 

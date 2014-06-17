@@ -54,6 +54,7 @@
 #include <QtGui/qwindowdefs.h>
 #include <qpa/qplatformscreen.h>
 #include <QtGui/qsurfaceformat.h>
+#include <QtGui/qopenglcontext.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -95,7 +96,9 @@ public:
         NonFullScreenWindows,
         NativeWidgets,
         WindowManagement,
-        SyncState
+        SyncState,
+        RasterGLSurface,
+        AllGLFunctionsQueryable
     };
 
     virtual ~QPlatformIntegration() { }
@@ -168,6 +171,11 @@ public:
 #endif
 
     virtual void sync();
+
+#ifndef QT_NO_OPENGL
+    virtual QOpenGLContext::OpenGLModuleType openGLModuleType();
+#endif
+
 protected:
     void screenAdded(QPlatformScreen *screen);
 };

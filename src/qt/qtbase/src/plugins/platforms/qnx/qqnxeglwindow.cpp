@@ -1,6 +1,6 @@
 /***************************************************************************
 **
-** Copyright (C) 2013 BlackBerry Limited. All rights reserved.
+** Copyright (C) 2013 - 2014 BlackBerry Limited. All rights reserved.
 ** Contact: http://www.qt-project.org/legal
 **
 ** This file is part of the plugins of the Qt Toolkit.
@@ -70,8 +70,7 @@ QQnxEglWindow::QQnxEglWindow(QWindow *window, screen_context_t context, bool nee
     if (result != 0)
         qFatal("QQnxEglWindow: failed to set window alpha usage, errno=%d", errno);
 
-    m_requestedBufferSize = screen()->rootWindow() == this ?
-                            screen()->geometry().size() : window->geometry().size();
+    m_requestedBufferSize = shouldMakeFullScreen() ? screen()->geometry().size() : window->geometry().size();
 }
 
 QQnxEglWindow::~QQnxEglWindow()
@@ -82,15 +81,14 @@ QQnxEglWindow::~QQnxEglWindow()
 
 void QQnxEglWindow::createEGLSurface()
 {
-    // Fetch the surface size from the window and update
-    // the window's buffers before we create the EGL surface
-    const QSize surfaceSize = requestedBufferSize();
-    if (!surfaceSize.isValid()) {
+    if (!m_requestedBufferSize.isValid()) {
         qWarning("QQNX: Trying to create 0 size EGL surface. "
                "Please set a valid window size before calling QOpenGLContext::makeCurrent()");
         return;
     }
-    setBufferSize(surfaceSize);
+
+    // update the window's buffers before we create the EGL surface
+    setBufferSize(m_requestedBufferSize);
 
     const EGLint eglSurfaceAttrs[] =
     {
@@ -100,9 +98,10 @@ void QQnxEglWindow::createEGLSurface()
 
     qEglWindowDebug() << "Creating EGL surface" << platformOpenGLContext()->getEglDisplay()
                    << platformOpenGLContext()->getEglConfig();
+
     // Create EGL surface
-    m_eglSurface = eglCreateWindowSurface(platformOpenGLContext()->getEglDisplay()
-                                          , platformOpenGLContext()->getEglConfig(),
+    m_eglSurface = eglCreateWindowSurface(platformOpenGLContext()->getEglDisplay(),
+                                          platformOpenGLContext()->getEglConfig(),
                                           (EGLNativeWindowType) nativeHandle(), eglSurfaceAttrs);
     if (m_eglSurface == EGL_NO_SURFACE) {
         const EGLenum error = QQnxGLContext::checkEGLError("eglCreateWindowSurface");
@@ -135,8 +134,7 @@ void QQnxEglWindow::swapEGLBuffers()
     if (eglResult != EGL_TRUE)
         qFatal("QQNX: failed to swap EGL buffers, err=%d", eglGetError());
 
-    if (m_cover)
-        m_cover->updateCover();
+    windowPosted();
 }
 
 EGLSurface QQnxEglWindow::getSurface()
@@ -157,7 +155,7 @@ EGLSurface QQnxEglWindow::getSurface()
 void QQnxEglWindow::setGeometry(const QRect &rect)
 {
     //If this is the root window, it has to be shown fullscreen
-    const QRect &newGeometry = screen()->rootWindow() == this ? screen()->geometry() : rect;
+    const QRect &newGeometry = shouldMakeFullScreen() ? screen()->geometry() : rect;
 
     //We need to request that the GL context updates
     // the EGLsurface on which it is rendering.
@@ -171,11 +169,6 @@ void QQnxEglWindow::setGeometry(const QRect &rect)
             m_newSurfaceRequested.testAndSetRelease(false, true);
     }
     QQnxWindow::setGeometry(newGeometry);
-}
-
-QSize QQnxEglWindow::requestedBufferSize() const
-{
-    return m_requestedBufferSize;
 }
 
 void QQnxEglWindow::setPlatformOpenGLContext(QQnxGLContext *platformOpenGLContext)

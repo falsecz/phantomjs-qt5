@@ -58,7 +58,7 @@ QT_BEGIN_NAMESPACE
 Q_WIDGETS_EXPORT extern bool qt_tab_all_widgets();
 
 QWidget *qt_button_down = 0; // widget got last button-down
-static QWidget *qt_tablet_target = 0;
+static QPointer<QWidget> qt_tablet_target = 0;
 
 // popup control
 QWidget *qt_popup_down = 0; // popup that contains the pressed widget
@@ -92,13 +92,18 @@ QWidgetWindow::QWidgetWindow(QWidget *widget)
     , m_widget(widget)
 {
     updateObjectName();
+    // Enable QOpenGLWidget/QQuickWidget children if the platform plugin supports it,
+    // and the application developer has not explicitly disabled it.
+    if (QGuiApplicationPrivate::platformIntegration()->hasCapability(QPlatformIntegration::RasterGLSurface)
+        && !QApplication::testAttribute(Qt::AA_ForceRasterWidgets)) {
+        setSurfaceType(QSurface::RasterGLSurface);
+    }
     connect(m_widget, &QObject::objectNameChanged, this, &QWidgetWindow::updateObjectName);
+    connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(repaintWindow()));
 }
 
 QWidgetWindow::~QWidgetWindow()
 {
-    if (m_widget == qt_tablet_target)
-        qt_tablet_target = 0;
 }
 
 #ifndef QT_NO_ACCESSIBILITY
@@ -401,6 +406,7 @@ void QWidgetWindow::handleMouseEvent(QMouseEvent *event)
                 widgetPos = receiver->mapFromGlobal(event->globalPos());
             QWidget *alien = m_widget->childAt(m_widget->mapFromGlobal(event->globalPos()));
             QMouseEvent e(event->type(), widgetPos, event->windowPos(), event->screenPos(), event->button(), event->buttons(), event->modifiers());
+            QGuiApplicationPrivate::setMouseEventSource(&e, QGuiApplicationPrivate::mouseEventSource(event));
             e.setTimestamp(event->timestamp());
             QApplicationPrivate::sendMouseEvent(receiver, &e, alien, m_widget, &qt_button_down, qt_last_mouse_receiver);
         } else {
@@ -436,6 +442,7 @@ void QWidgetWindow::handleMouseEvent(QMouseEvent *event)
                     if (win && win->geometry().contains(event->globalPos())) {
                         const QPoint localPos = win->mapFromGlobal(event->globalPos());
                         QMouseEvent e(QEvent::MouseButtonPress, localPos, localPos, event->globalPos(), event->button(), event->buttons(), event->modifiers());
+                        QGuiApplicationPrivate::setMouseEventSource(&e, QGuiApplicationPrivate::mouseEventSource(event));
                         e.setTimestamp(event->timestamp());
                         QApplication::sendSpontaneousEvent(win, &e);
                     }
@@ -474,7 +481,7 @@ void QWidgetWindow::handleMouseEvent(QMouseEvent *event)
     if (!widget)
         widget = m_widget;
 
-    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)
+    if (event->type() == QEvent::MouseButtonPress)
         qt_button_down = widget;
 
     QWidget *receiver = QApplicationPrivate::pickMouseReceiver(m_widget, event->windowPos().toPoint(), &mapped, event->type(), event->buttons(),
@@ -492,6 +499,7 @@ void QWidgetWindow::handleMouseEvent(QMouseEvent *event)
         // creation of a MouseButtonDblClick event. QTBUG-25831
         QMouseEvent translated(event->type(), mapped, event->windowPos(), event->screenPos(),
                                event->button(), event->buttons(), event->modifiers());
+        QGuiApplicationPrivate::setMouseEventSource(&translated, QGuiApplicationPrivate::mouseEventSource(event));
         translated.setTimestamp(event->timestamp());
         QApplicationPrivate::sendMouseEvent(receiver, &translated, widget, m_widget,
                                             &qt_button_down, qt_last_mouse_receiver);
@@ -546,6 +554,19 @@ void QWidgetWindow::updateGeometry()
     te->posIncludesFrame= false;
     te->frameStrut.setCoords(margins.left(), margins.top(), margins.right(), margins.bottom());
     m_widget->data->fstrut_dirty = false;
+}
+
+// Invalidates the backing store buffer and repaints immediately.
+// ### Qt 5.4: replace with QUpdateWindowRequestEvent.
+void QWidgetWindow::repaintWindow()
+{
+    if (!m_widget->isVisible() || !m_widget->updatesEnabled())
+        return;
+
+    QTLWExtra *tlwExtra = m_widget->window()->d_func()->maybeTopData();
+    if (tlwExtra && !tlwExtra->inTopLevelResize && tlwExtra->backingStore)
+        tlwExtra->backingStoreTracker->markDirty(m_widget->rect(), m_widget,
+                                                 QWidgetBackingStore::UpdateNow, QWidgetBackingStore::BufferInvalid);
 }
 
 Qt::WindowState effectiveState(Qt::WindowStates state);

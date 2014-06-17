@@ -51,7 +51,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "qcocoahelpers.h"
-#include "qmacmime.h"
 #include "qcocoaautoreleasepool.h"
 
 QT_BEGIN_NAMESPACE
@@ -306,6 +305,11 @@ QMacPasteboard::setMimeData(QMimeData *mime_src)
             QString mimeType = formats.at(f);
             for (QList<QMacInternalPasteboardMime *>::Iterator it = availableConverters.begin(); it != availableConverters.end(); ++it) {
                 QMacInternalPasteboardMime *c = (*it);
+                // Hack: The Rtf handler converts incoming Rtf to Html. We do
+                // not want to convert outgoing Html to Rtf but instead keep
+                // posting it as Html. Skip the Rtf handler here.
+                if (c->convertorName() == QStringLiteral("Rtf"))
+                    continue;
                 QString flavor(c->flavorFor(mimeType));
                 if (!flavor.isEmpty()) {
                     QVariant mimeData = static_cast<QMacMimeData*>(mime_src)->variantData(mimeType);

@@ -387,7 +387,12 @@ static int choosePixelFormat(HDC hdc,
     iAttributes[i++] = WGL_DRAW_TO_WINDOW_ARB;
     iAttributes[i++] = TRUE;
     iAttributes[i++] = WGL_COLOR_BITS_ARB;
-    iAttributes[i++] = 24;
+
+    iAttributes[i++] = (format.redBufferSize() > 0)
+                       && (format.greenBufferSize() > 0)
+                       && (format.blueBufferSize() > 0) ?
+                       format.redBufferSize() + format.greenBufferSize() + format.blueBufferSize() :
+                       24;
     switch (format.swapBehavior()) {
     case QSurfaceFormat::SingleBuffer:
         iAttributes[i++] = WGL_DOUBLE_BUFFER_ARB;
@@ -706,6 +711,8 @@ QWindowsOpenGLContextFormat QWindowsOpenGLContextFormat::current()
             minorDot = version.size();
         result.version = (version.mid(0, majorDot).toInt() << 8)
             + version.mid(majorDot + 1, minorDot - majorDot - 1).toInt();
+    } else {
+        result.version = 0x0200;
     }
     result.profile = QSurfaceFormat::NoProfile;
     if (result.version < 0x0300) {
@@ -1050,7 +1057,7 @@ bool QWindowsGLContext::makeCurrent(QPlatformSurface *surface)
         qCDebug(lcQpaGl) << __FUNCTION__ << this << m_windowContexts.size() << "contexts";
 #endif // DEBUG_GL
 
-    Q_ASSERT(surface->surface()->surfaceType() == QSurface::OpenGLSurface);
+    Q_ASSERT(surface->surface()->supportsOpenGL());
 
     // Do we already have a DC entry for that window?
     QWindowsWindow *window = static_cast<QWindowsWindow *>(surface);

@@ -159,10 +159,6 @@ QWindow::QWindow(QScreen *targetScreen)
     d->screen = targetScreen;
     if (!d->screen)
         d->screen = QGuiApplication::primaryScreen();
-
-    //if your applications aborts here, then chances are your creating a QWindow before the
-    //screen list is populated.
-    Q_ASSERT(d->screen);
     d->init();
 }
 
@@ -232,6 +228,13 @@ QWindow::~QWindow()
 void QWindowPrivate::init()
 {
     Q_Q(QWindow);
+
+    // If your application aborts here, you are probably creating a QWindow
+    // before the screen list is populated.
+    if (!screen) {
+        qFatal("Cannot create window: no screens available");
+        exit(1);
+    }
     QObject::connect(screen, SIGNAL(destroyed(QObject*)), q, SLOT(screenDestroyed(QObject*)));
     QGuiApplicationPrivate::window_list.prepend(q);
 }
@@ -431,6 +434,14 @@ void QWindow::setVisible(bool visible)
     if (visible) {
         // remove posted quit events when showing a new window
         QCoreApplication::removePostedEvents(qApp, QEvent::Quit);
+
+        if (type() == Qt::Window) {
+            QString &firstWindowTitle = QGuiApplicationPrivate::instance()->firstWindowTitle;
+            if (!firstWindowTitle.isEmpty()) {
+                setTitle(firstWindowTitle);
+                firstWindowTitle = QString();
+            }
+        }
 
         QShowEvent showEvent;
         QGuiApplication::sendEvent(this, &showEvent);
@@ -634,7 +645,7 @@ void QWindow::setFormat(const QSurfaceFormat &format)
 }
 
 /*!
-    Returns the requested surfaceformat of this window.
+    Returns the requested surface format of this window.
 
     If the requested format was not supported by the platform implementation,
     the requestedFormat will differ from the actual window format.
@@ -654,9 +665,17 @@ QSurfaceFormat QWindow::requestedFormat() const
 
     After the window has been created, this function will return the actual surface format
     of the window. It might differ from the requested format if the requested format could
-    not be fulfilled by the platform.
+    not be fulfilled by the platform. It might also be a superset, for example certain
+    buffer sizes may be larger than requested.
 
-    \sa create(), requestedFormat()
+    \note Depending on the platform, certain values in this surface format may still
+    contain the requested values, that is, the values that have been passed to
+    setFormat(). Typical examples are the OpenGL version, profile and options. These may
+    not get updated during create() since these are context specific and a single window
+    may be used together with multiple contexts over its lifetime. Use the
+    QOpenGLContext's format() instead to query such values.
+
+    \sa create(), requestedFormat(), QOpenGLContext::format()
 */
 QSurfaceFormat QWindow::format() const
 {
@@ -719,9 +738,15 @@ Qt::WindowType QWindow::type() const
 void QWindow::setTitle(const QString &title)
 {
     Q_D(QWindow);
-    d->windowTitle = title;
+    bool changed = false;
+    if (d->windowTitle != title) {
+        d->windowTitle = title;
+        changed = true;
+    }
     if (d->platformWindow)
         d->platformWindow->setWindowTitle(title);
+    if (changed)
+        emit windowTitleChanged(title);
 }
 
 QString QWindow::title() const
@@ -768,6 +793,8 @@ void QWindow::setIcon(const QIcon &icon)
     d->windowIcon = icon;
     if (d->platformWindow)
         d->platformWindow->setWindowIcon(icon);
+    QEvent e(QEvent::WindowIconChange);
+    QCoreApplication::sendEvent(this, &e);
 }
 
 /*!
@@ -778,6 +805,8 @@ void QWindow::setIcon(const QIcon &icon)
 QIcon QWindow::icon() const
 {
     Q_D(const QWindow);
+    if (d->windowIcon.isNull())
+        return QGuiApplication::windowIcon();
     return d->windowIcon;
 }
 
@@ -1722,7 +1751,10 @@ void QWindow::showFullScreen()
 {
     setWindowState(Qt::WindowFullScreen);
     setVisible(true);
+#if !defined Q_OS_QNX // On QNX this window will be activated anyway from libscreen
+                      // activating it here before libscreen activates it causes problems
     requestActivate();
+#endif
 }
 
 /*!
@@ -1930,6 +1962,10 @@ bool QWindow::event(QEvent *ev)
 
     case QEvent::Hide:
         hideEvent(static_cast<QHideEvent *>(ev));
+        break;
+
+    case QEvent::ApplicationWindowIconChange:
+        setIcon(icon());
         break;
 
     case QEvent::WindowStateChange: {

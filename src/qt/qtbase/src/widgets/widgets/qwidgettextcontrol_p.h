@@ -239,7 +239,7 @@ public:
 
     void setFocus(bool focus, Qt::FocusReason = Qt::OtherFocusReason);
 
-    virtual QVariant inputMethodQuery(Qt::InputMethodQuery property) const;
+    virtual QVariant inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const;
 
     virtual QMimeData *createMimeDataFromSelection() const;
     virtual bool canInsertFromMimeData(const QMimeData *source) const;
@@ -262,6 +262,7 @@ private:
     Q_PRIVATE_SLOT(d_func(), void _q_copyLink())
     Q_PRIVATE_SLOT(d_func(), void _q_updateBlock(const QTextBlock &))
     Q_PRIVATE_SLOT(d_func(), void _q_documentLayoutChanged())
+    Q_PRIVATE_SLOT(d_func(), void _q_contentsChanged(int, int, int))
 };
 
 

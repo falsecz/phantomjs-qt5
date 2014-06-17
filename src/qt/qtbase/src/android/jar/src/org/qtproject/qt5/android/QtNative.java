@@ -55,6 +55,7 @@ import android.util.Log;
 import android.view.ContextMenu;
 import android.view.Menu;
 import android.view.MotionEvent;
+import android.view.View;
 
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
@@ -510,12 +511,22 @@ public class QtNative
         return certificateArray;
     }
 
-    private static void createSurface(final int id, final boolean onTop, final int x, final int y, final int w, final int h)
+    private static void createSurface(final int id, final boolean onTop, final int x, final int y, final int w, final int h, final int imageDepth)
     {
         runAction(new Runnable() {
             @Override
             public void run() {
-                m_activityDelegate.createSurface(id, onTop, x, y, w, h);
+                m_activityDelegate.createSurface(id, onTop, x, y, w, h, imageDepth);
+            }
+        });
+    }
+
+    private static void insertNativeView(final int id, final View view, final int x, final int y, final int w, final int h)
+    {
+        runAction(new Runnable() {
+            @Override
+            public void run() {
+                m_activityDelegate.insertNativeView(id, view, x, y, w, h);
             }
         });
     }
@@ -587,4 +598,7 @@ public class QtNative
     public static native boolean onContextItemSelected(int itemId, boolean checked);
     public static native void onContextMenuClosed(Menu menu);
     // menu methods
+
+    // activity methods
+    public static native void onActivityResult(int requestCode, int resultCode, Intent data);
 }

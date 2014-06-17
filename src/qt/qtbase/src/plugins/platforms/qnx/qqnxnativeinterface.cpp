@@ -48,11 +48,18 @@
 #include "qqnxinputcontext_imf.h"
 #endif
 
+#include "qqnxintegration.h"
+
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 
 QT_BEGIN_NAMESPACE
+
+QQnxNativeInterface::QQnxNativeInterface(QQnxIntegration *integration)
+    : m_integration(integration)
+{
+}
 
 void *QQnxNativeInterface::nativeResourceForWindow(const QByteArray &resource, QWindow *window)
 {
@@ -78,6 +85,16 @@ void *QQnxNativeInterface::nativeResourceForScreen(const QByteArray &resource, Q
     return 0;
 }
 
+void *QQnxNativeInterface::nativeResourceForIntegration(const QByteArray &resource)
+{
+#ifdef Q_OS_BLACKBERRY
+    if (resource == "navigatorEventHandler")
+        return m_integration->navigatorEventHandler();
+#endif
+
+    return 0;
+}
+
 void *QQnxNativeInterface::nativeResourceForContext(const QByteArray &resource, QOpenGLContext *context)
 {
     if (resource == "eglcontext" && context)
@@ -92,7 +109,7 @@ void QQnxNativeInterface::setWindowProperty(QPlatformWindow *window, const QStri
 
     if (name == QStringLiteral("mmRendererWindowName")) {
         qnxWindow->setMMRendererWindowName(value.toString());
-    } else if (name == QStringLiteral("windowGroup")) {
+    } else if (name == QStringLiteral("qnxWindowGroup")) {
         if (value.isNull())
             qnxWindow->joinWindowGroup(QByteArray());
         else if (value.canConvert<QByteArray>())
@@ -107,6 +124,8 @@ QPlatformNativeInterface::NativeResourceForIntegrationFunction QQnxNativeInterfa
         return reinterpret_cast<NativeResourceForIntegrationFunction>(QQnxInputContext::setHighlightColor);
     if (resource == "blackberryIMFCheckSpelling")
         return reinterpret_cast<NativeResourceForIntegrationFunction>(QQnxInputContext::checkSpelling);
+#else
+    Q_UNUSED(resource)
 #endif
     return 0;
 }

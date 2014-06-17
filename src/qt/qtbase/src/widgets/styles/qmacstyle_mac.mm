@@ -179,6 +179,19 @@ static bool isVerticalTabs(const QTabBar::Shape shape) {
                 || shape == QTabBar::TriangularWest);
 }
 
+static bool isInMacUnifiedToolbarArea(QWindow *window, int windowY)
+{
+    QPlatformNativeInterface *nativeInterface = QGuiApplication::platformNativeInterface();
+    QPlatformNativeInterface::NativeResourceForIntegrationFunction function =
+        nativeInterface->nativeResourceFunctionForIntegration("testContentBorderPosition");
+    if (!function)
+        return false; // Not Cocoa platform plugin.
+
+    typedef bool (*TestContentBorderPositionFunction)(QWindow *, int);
+    return (reinterpret_cast<TestContentBorderPositionFunction>(function))(window, windowY);
+}
+
+
 void drawTabCloseButton(QPainter *p, bool hover, bool active, bool selected)
 {
     // draw background circle
@@ -239,7 +252,7 @@ QRect rotateTabPainter(QPainter *p, QTabBar::Shape shape, QRect tabRect)
     return tabRect;
 }
 
-void drawTabShape(QPainter *p, const QStyleOptionTabV3 *tabOpt)
+void drawTabShape(QPainter *p, const QStyleOptionTabV3 *tabOpt, bool isUnified)
 {
     QRect r = tabOpt->rect;
     p->translate(tabOpt->rect.x(), tabOpt->rect.y());
@@ -256,7 +269,12 @@ void drawTabShape(QPainter *p, const QStyleOptionTabV3 *tabOpt)
         QRect rect(1, 0, width - 2, height);
 
         // fill body
-        if (active) {
+        if (tabOpt->documentMode && isUnified) {
+            p->save();
+            p->setCompositionMode(QPainter::CompositionMode_Source);
+            p->fillRect(rect, QColor(Qt::transparent));
+            p->restore();
+        } else if (active) {
             int d = (QSysInfo::MacintoshVersion >= QSysInfo::MV_10_6) ? 16 : 0;
             p->fillRect(rect, QColor(151 + d, 151 + d, 151 + d));
         } else {
@@ -524,18 +542,6 @@ static QColor qcolorFromCGColor(CGColorRef cgcolor)
         Q_ASSERT(false);
     }
     return pc;
-}
-
-static inline QColor leopardBrush(ThemeBrush brush)
-{
-    QCFType<CGColorRef> cgClr = 0;
-    HIThemeBrushCreateCGColor(brush, &cgClr);
-    return qcolorFromCGColor(cgClr);
-}
-
-QColor qcolorForTheme(ThemeBrush brush)
-{
-    return leopardBrush(brush);
 }
 
 OSStatus qt_mac_shape2QRegionHelper(int inMessage, HIShapeRef, const CGRect *inRect, void *inRefcon)
@@ -1717,8 +1723,9 @@ void QMacStylePrivate::drawColorlessButton(const HIRect &macRect, HIThemeButtonD
         }
     }
 
-    int width = int(macRect.size.width) + extraWidth;
-    int height = int(macRect.size.height) + extraHeight;
+    int devicePixelRatio = p->device()->devicePixelRatio();
+    int width = devicePixelRatio * (int(macRect.size.width) + extraWidth);
+    int height = devicePixelRatio * (int(macRect.size.height) + extraHeight);
 
     if (width <= 0 || height <= 0)
         return;   // nothing to draw
@@ -1730,6 +1737,7 @@ void QMacStylePrivate::drawColorlessButton(const HIRect &macRect, HIThemeButtonD
     QPixmap pm;
     if (!QPixmapCache::find(key, pm)) {
         QPixmap activePixmap(width, height);
+        activePixmap.setDevicePixelRatio(devicePixelRatio);
         activePixmap.fill(Qt::transparent);
         {
             if (combo){
@@ -1780,6 +1788,7 @@ void QMacStylePrivate::drawColorlessButton(const HIRect &macRect, HIThemeButtonD
             QImage colorlessImage;
             {
                 QPixmap colorlessPixmap(width, height);
+                colorlessPixmap.setDevicePixelRatio(devicePixelRatio);
                 colorlessPixmap.fill(Qt::transparent);
 
                 QMacCGContext cg(&colorlessPixmap);
@@ -1813,7 +1822,7 @@ void QMacStylePrivate::drawColorlessButton(const HIRect &macRect, HIThemeButtonD
         }
         QPixmapCache::insert(key, pm);
     }
-    p->drawPixmap(int(macRect.origin.x) - xoff, int(macRect.origin.y) + finalyoff, width, height, pm);
+    p->drawPixmap(int(macRect.origin.x) - xoff, int(macRect.origin.y) + finalyoff, width / devicePixelRatio, height / devicePixelRatio , pm);
 }
 
 QMacStyle::QMacStyle()
@@ -1914,11 +1923,6 @@ void QMacStyle::polish(QPalette &pal)
         qt_mac_backgroundPattern = new QPixmap(d->generateBackgroundPattern());
     }
 
-    QColor pc(Qt::black);
-    pc = qcolorForTheme(kThemeBrushDialogBackgroundActive);
-    QBrush background(pc, *qt_mac_backgroundPattern);
-    pal.setBrush(QPalette::All, QPalette::Window, background);
-    pal.setBrush(QPalette::All, QPalette::Button, background);
 
     QCFString theme;
     const OSErr err = CopyThemeIdentifier(&theme);
@@ -2514,12 +2518,12 @@ int QMacStyle::styleHint(StyleHint sh, const QStyleOption *opt, const QWidget *w
         ret = 100;
         break;
     case SH_ScrollBar_LeftClickAbsolutePosition: {
+        NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+        bool result = [defaults boolForKey:@"AppleScrollerPagingBehavior"];
         if(QApplication::keyboardModifiers() & Qt::AltModifier)
-            ret = false;
-            //ret = !qt_scrollbar_jump_to_pos;
+            ret = !result;
         else
-            ret = true;
-            //ret = qt_scrollbar_jump_to_pos;
+            ret = result;
         break; }
     case SH_TabBar_PreferNoArrows:
         ret = true;
@@ -2529,9 +2533,6 @@ int QMacStyle::styleHint(StyleHint sh, const QStyleOption *opt, const QWidget *w
         ret = QDialogButtons::Reject;
         break;
         */
-    case SH_Menu_SloppySubMenus:
-        ret = true;
-        break;
     case SH_GroupBox_TextLabelVerticalAlignment:
         ret = Qt::AlignTop;
         break;
@@ -3738,7 +3739,7 @@ void QMacStyle::drawControl(ControlElement ce, const QStyleOption *opt, QPainter
             QStyleOptionComboBox comboCopy = *cb;
             comboCopy.direction = Qt::LeftToRight;
             if ((opt->state & QStyle::State_Small) && QSysInfo::macVersion() > QSysInfo::MV_10_6)
-                comboCopy.rect.translate(0, w ? -1 : -2); // Supports Qt Quick Controls
+                comboCopy.rect.translate(0, w ? (QSysInfo::macVersion() > QSysInfo::MV_10_8 ? 0 : -1) : -2); // Supports Qt Quick Controls
             else if (QSysInfo::macVersion() > QSysInfo::MV_10_8)
                 comboCopy.rect.translate(0, 1);
             QCommonStyle::drawControl(CE_ComboBoxLabel, &comboCopy, p, w);
@@ -3750,8 +3751,14 @@ void QMacStyle::drawControl(ControlElement ce, const QStyleOption *opt, QPainter
             if (const QStyleOptionTabV3 *tabOptV3 = qstyleoption_cast<const QStyleOptionTabV3 *>(opt)) {
                 if (tabOptV3->documentMode) {
                     p->save();
-                    // QRect tabRect = tabOptV3->rect;
-                    drawTabShape(p, tabOptV3);
+                    bool isUnified = false;
+                    if (w) {
+                        QRect tabRect = tabOptV3->rect;
+                        QPoint windowTabStart = w->mapTo(w->window(), tabRect.topLeft());
+                        isUnified = isInMacUnifiedToolbarArea(w->window()->windowHandle(), windowTabStart.y());
+                    }
+
+                    drawTabShape(p, tabOptV3, isUnified);
                     p->restore();
                     return;
                 }
@@ -4431,7 +4438,9 @@ void QMacStyle::drawControl(ControlElement ce, const QStyleOption *opt, QPainter
                     QPen pen(strokeColor);
                     p->setPen(pen);
                     p->setBrush(fillColor);
-                    p->drawRect(opt->rect.adjusted(0, 0, -1, -1));
+                    QRect adjusted = opt->rect.adjusted(1, 1, -1, -1);
+                    if (adjusted.isValid())
+                        p->drawRect(adjusted);
                     p->setPen(oldPen);
                     p->setBrush(oldBrush);
                 }
@@ -4457,15 +4466,22 @@ void QMacStyle::drawControl(ControlElement ce, const QStyleOption *opt, QPainter
                     p->fillRect(opt->rect, Qt::transparent);
                     p->restore();
 
-                    // drow horizontal sepearator line at toolBar bottom.
-                    SInt32 margin;
-                    GetThemeMetric(kThemeMetricSeparatorSize, &margin);
-                    CGRect separatorRect = CGRectMake(opt->rect.left(), opt->rect.bottom(), opt->rect.width(), margin);
-                    HIThemeSeparatorDrawInfo separatorDrawInfo;
-                    separatorDrawInfo.version = 0;
-                    separatorDrawInfo.state = qt_macWindowMainWindow(mainWindow) ? kThemeStateActive : kThemeStateInactive;
-                    QMacCGContext cg(p);
-                    HIThemeDrawSeparator(&separatorRect, &separatorDrawInfo, cg, kHIThemeOrientationNormal);
+                    // Drow a horizontal sepearator line at the toolBar bottom if the "unified" area ends here.
+                    // There might be additional toolbars or other widgets such as tab bars in document
+                    // mode below. Determine this by making a unified toolbar area test for the row below
+                    // this toolbar.
+                    QPoint windowToolbarEnd = w->mapTo(w->window(), opt->rect.bottomLeft());
+                    bool isEndOfUnifiedArea = !isInMacUnifiedToolbarArea(w->window()->windowHandle(), windowToolbarEnd.y() + 1);
+                    if (isEndOfUnifiedArea) {
+                        SInt32 margin;
+                        GetThemeMetric(kThemeMetricSeparatorSize, &margin);
+                        CGRect separatorRect = CGRectMake(opt->rect.left(), opt->rect.bottom(), opt->rect.width(), margin);
+                        HIThemeSeparatorDrawInfo separatorDrawInfo;
+                        separatorDrawInfo.version = 0;
+                        separatorDrawInfo.state = qt_macWindowMainWindow(mainWindow) ? kThemeStateActive : kThemeStateInactive;
+                        QMacCGContext cg(p);
+                        HIThemeDrawSeparator(&separatorRect, &separatorDrawInfo, cg, kHIThemeOrientationNormal);
+                    }
                     break;
                 }
             }
@@ -5021,7 +5037,7 @@ void QMacStyle::drawComplexControl(ComplexControl cc, const QStyleOptionComplex 
                     int oldState = styleObject->property("_q_stylestate").toInt();
                     uint oldActiveControls = styleObject->property("_q_stylecontrols").toUInt();
 
-                    // a scrollbar is transient when the the scrollbar itself and
+                    // a scrollbar is transient when the scrollbar itself and
                     // its sibling are both inactive (ie. not pressed/hovered/moved)
                     bool transient = !opt->activeSubControls && !(slider->state & State_On);
 
@@ -5824,12 +5840,6 @@ QRect QMacStyle::subControlRect(ComplexControl cc, const QStyleOptionComplex *op
             switch (sc) {
             case SC_ComboBoxEditField:{
                 ret = QMacStylePrivate::comboboxEditBounds(combo->rect, bdi);
-                    // hack to posistion the edit feld correctly for QDateTimeEdits
-                    // in calendarPopup mode.
-                    if (qobject_cast<const QDateTimeEdit *>(widget)) {
-                       ret.moveTop(ret.top() - 2);
-                       ret.setHeight(ret.height() +1);
-                    }
                 break; }
             case SC_ComboBoxArrow:{
                 ret = QMacStylePrivate::comboboxEditBounds(combo->rect, bdi);
@@ -6715,6 +6725,8 @@ CGContextRef qt_mac_cg_context(const QPaintDevice *pdev)
         }
 
         CGContextTranslateCTM(ret, 0, pm->height());
+        int devicePixelRatio = pdev->devicePixelRatio();
+        CGContextScaleCTM(ret, devicePixelRatio, devicePixelRatio);
         CGContextScaleCTM(ret, 1, -1);
         return ret;
     } else if (pdev->devType() == QInternal::Widget) {

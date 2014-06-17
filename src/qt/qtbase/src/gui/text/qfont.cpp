@@ -546,6 +546,7 @@ QFontEngineData::~QFontEngineData()
 
 /*!
     \fn QString QFont::rawName() const
+    \deprecated
 
     Returns the name of the font within the underlying window system.
 
@@ -559,6 +560,7 @@ QFontEngineData::~QFontEngineData()
 
 /*!
     \fn void QFont::setRawName(const QString &name)
+    \deprecated
 
     Sets a font by its system specific name.
 
@@ -1106,7 +1108,7 @@ int QFont::weight() const
 
     Qt uses a weighting scale from 0 to 99 similar to, but not the
     same as, the scales used in Windows or CSS. A weight of 0 is
-    ultralight, whilst 99 will be an extremely black.
+    ultralight, whilst 99 will be extremely black.
 
     This enum contains the predefined font weights:
 
@@ -1282,7 +1284,7 @@ bool QFont::kerning() const
     When kerning is enabled, glyph metrics do not add up anymore,
     even for Latin text. In other words, the assumption that
     width('a') + width('b') is equal to width("ab") is not
-    neccesairly true.
+    necessarily true.
 
     \sa kerning(), QFontMetrics
 */
@@ -2073,6 +2075,18 @@ QString QFont::toString() const
         QString::number((int)   rawMode());
 }
 
+/*!
+    Returns the hash value for \a font. If specified, \a seed is used
+    to initialize the hash.
+
+    \relates QFont
+    \since 5.3
+*/
+uint qHash(const QFont &font, uint seed) Q_DECL_NOTHROW
+{
+    return qHash(QFontPrivate::get(font)->request, seed);
+}
+
 
 /*!
     Sets this font to match the description \a descrip. The description
@@ -2383,7 +2397,7 @@ QString QFontInfo::family() const
     \since 4.8
 
     Returns the style name of the matched window system font on
-    system that supports it.
+    systems that support it.
 
     \sa QFont::styleName()
 */
@@ -2758,10 +2772,10 @@ void QFontCache::updateHitCountAndTimeStamp(Engine &value)
     value.timestamp = ++current_timestamp;
 
     FC_DEBUG("QFontCache: found font engine\n"
-             "  %p: timestamp %4u hits %3u ref %2d/%2d, type '%s'",
+             "  %p: timestamp %4u hits %3u ref %2d/%2d, type %d",
              value.data, value.timestamp, value.hits,
              value.data->ref.load(), engineCacheCount.value(value.data),
-             value.data->name());
+             value.data->type());
 }
 
 void QFontCache::insertEngine(const Key &key, QFontEngine *engine, bool insertMulti)
@@ -2957,10 +2971,10 @@ void QFontCache::timerEvent(QTimerEvent *)
 
         it = jt;
         if (it != end) {
-            FC_DEBUG("    %p: timestamp %4u hits %2u ref %2d/%2d, type '%s'",
+            FC_DEBUG("    %p: timestamp %4u hits %2u ref %2d/%2d, type %d",
                      it.value().data, it.value().timestamp, it.value().hits,
                      it.value().data->ref.load(), engineCacheCount.value(it.value().data),
-                     it.value().data->name());
+                     it.value().data->type());
 
             QFontEngine *fontEngine = it.value().data;
             // get rid of all occurrences

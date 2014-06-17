@@ -39,20 +39,6 @@
 **
 ****************************************************************************/
 
-#if defined(__OPTIMIZE__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) \
-    && (__GNUC__ * 100 + __GNUC_MINOR__ * 10 + __GNUC_PATCHLEVEL__ >= 440)
-// GCC 4.4 supports #pragma GCC optimize and #pragma GCC target
-
-#    if (__GNUC__ * 100 + __GNUC_MINOR__ * 10 + __GNUC_PATCHLEVEL__ < 473)
-// From GCC 4.7.3 onwards, GCC optimize can result in gcc bailing out with OOM
-#        pragma GCC optimize "O3"
-#    endif
-
-#    if defined(__i386__) && defined(__SSE2__) && !defined(__SSE2_MATH__)
-#        pragma GCC target "fpmath=sse"
-#    endif
-#endif
-
 #include <qglobal.h>
 #ifdef Q_OS_IOS
 // We don't build the NEON drawhelpers as they are implemented partly
@@ -1217,7 +1203,7 @@ static inline uint interpolate_4_pixels_16(uint tl, uint tr, uint bl, uint br, i
 {
     uint distxy = distx * disty;
     //idistx * disty = (16-distx) * disty = 16*disty - distxy
-    //idistx * idisty = (16-distx) * (16-disty) = 16*16 - 16*distx -16*dity + distxy
+    //idistx * idisty = (16-distx) * (16-disty) = 16*16 - 16*distx -16*disty + distxy
     uint tlrb = (tl & 0x00ff00ff)         * (16*16 - 16*distx - 16*disty + distxy);
     uint tlag = ((tl & 0xff00ff00) >> 8)  * (16*16 - 16*distx - 16*disty + distxy);
     uint trrb = ((tr & 0x00ff00ff)        * (distx*16 - distxy));
@@ -1298,6 +1284,44 @@ static inline uint interpolate_4_pixels_16(uint tl, uint tr, uint bl, uint br, i
     vst1q_s16((int16_t*)(b), vorrq_s16(rAG, rRB)); \
 }
 #endif
+
+#if defined(__SSE2__)
+static inline uint interpolate_4_pixels(uint tl, uint tr, uint bl, uint br, uint distx, uint disty)
+{
+    // First interpolate right and left pixels in parallel.
+    __m128i vl = _mm_unpacklo_epi32(_mm_cvtsi32_si128(tl), _mm_cvtsi32_si128(bl));
+    __m128i vr = _mm_unpacklo_epi32(_mm_cvtsi32_si128(tr), _mm_cvtsi32_si128(br));
+    vl = _mm_unpacklo_epi8(vl, _mm_setzero_si128());
+    vr = _mm_unpacklo_epi8(vr, _mm_setzero_si128());
+    vl = _mm_mullo_epi16(vl, _mm_set1_epi16(256 - distx));
+    vr = _mm_mullo_epi16(vr, _mm_set1_epi16(distx));
+    __m128i vtb = _mm_add_epi16(vl, vr);
+    vtb = _mm_srli_epi16(vtb, 8);
+    // vtb now contains the result of the first two interpolate calls vtb = unpacked((xbot << 64) | xtop)
+
+    // Now the last interpolate between top and bottom interpolations.
+    const __m128i vidisty = _mm_shufflelo_epi16(_mm_cvtsi32_si128(256 - disty), _MM_SHUFFLE(0, 0, 0, 0));
+    const __m128i vdisty = _mm_shufflelo_epi16(_mm_cvtsi32_si128(disty), _MM_SHUFFLE(0, 0, 0, 0));
+    const __m128i vmuly = _mm_unpacklo_epi16(vidisty, vdisty);
+    vtb = _mm_unpacklo_epi16(vtb, _mm_srli_si128(vtb, 8));
+    // vtb now contains the colors of top and bottom interleaved { ta, ba, tr, br, tg, bg, tb, bb }
+    vtb = _mm_madd_epi16(vtb, vmuly); // Multiply and horizontal add.
+    vtb = _mm_srli_epi32(vtb, 8);
+    vtb = _mm_packs_epi32(vtb, _mm_setzero_si128());
+    vtb = _mm_packus_epi16(vtb, _mm_setzero_si128());
+    return _mm_cvtsi128_si32(vtb);
+}
+#else
+static inline uint interpolate_4_pixels(uint tl, uint tr, uint bl, uint br, uint distx, uint disty)
+{
+    uint idistx = 256 - distx;
+    uint idisty = 256 - disty;
+    uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
+    uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
+    return INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+}
+#endif
+
 
 template<TextureBlendType blendType>
 void fetchTransformedBilinear_pixelBounds(int max, int l1, int l2, int &v1, int &v2);
@@ -1503,7 +1527,6 @@ static const uint * QT_FASTCALL fetchTransformedBilinearARGB32PM(uint *buffer, c
                 const uint *s1 = (const uint *)data->texture.scanLine(y1);
                 const uint *s2 = (const uint *)data->texture.scanLine(y2);
                 int disty = (fy & 0x0000ffff) >> 8;
-                int idisty = 256 - disty;
                 while (b < end) {
                     int x1 = (fx >> 16);
                     int x2;
@@ -1512,13 +1535,8 @@ static const uint * QT_FASTCALL fetchTransformedBilinearARGB32PM(uint *buffer, c
                     uint tr = s1[x2];
                     uint bl = s2[x1];
                     uint br = s2[x2];
-
                     int distx = (fx & 0x0000ffff) >> 8;
-                    int idistx = 256 - distx;
-
-                    uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
-                    uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
-                    *b = INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+                    *b = interpolate_4_pixels(tl, tr, bl, br, distx, disty);
 
                     fx += fdx;
                     ++b;
@@ -1682,12 +1700,8 @@ static const uint * QT_FASTCALL fetchTransformedBilinearARGB32PM(uint *buffer, c
 
                     int distx = (fx & 0x0000ffff) >> 8;
                     int disty = (fy & 0x0000ffff) >> 8;
-                    int idistx = 256 - distx;
-                    int idisty = 256 - disty;
 
-                    uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
-                    uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
-                    *b = INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+                    *b = interpolate_4_pixels(tl, tr, bl, br, distx, disty);
 
                     fx += fdx;
                     fy += fdy;
@@ -1744,8 +1758,6 @@ static const uint * QT_FASTCALL fetchTransformedBilinearARGB32PM(uint *buffer, c
 
             int distx = int((px - x1) * 256);
             int disty = int((py - y1) * 256);
-            int idistx = 256 - distx;
-            int idisty = 256 - disty;
 
             fetchTransformedBilinear_pixelBounds<blendType>(image_width, image_x1, image_x2, x1, x2);
             fetchTransformedBilinear_pixelBounds<blendType>(image_height, image_y1, image_y2, y1, y2);
@@ -1758,9 +1770,7 @@ static const uint * QT_FASTCALL fetchTransformedBilinearARGB32PM(uint *buffer, c
             uint bl = s2[x1];
             uint br = s2[x2];
 
-            uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
-            uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
-            *b = INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+            *b = interpolate_4_pixels(tl, tr, bl, br, distx, disty);
 
             fx += fdx;
             fy += fdy;
@@ -1932,17 +1942,13 @@ static const uint *QT_FASTCALL fetchTransformedBilinear(uint *buffer, const Oper
 
                     if ((fdx < 0 && fdx > -(fixed_scale / 8)) || fabs(data->m22) < (1./8.)) { // scale up more than 8x
                         int disty = (fy & 0x0000ffff) >> 8;
-                        int idisty = 256 - disty;
                         for (int i = 0; i < len; ++i) {
                             uint tl = buf1[i * 2 + 0];
                             uint tr = buf1[i * 2 + 1];
                             uint bl = buf2[i * 2 + 0];
                             uint br = buf2[i * 2 + 1];
                             int distx = (fracX & 0x0000ffff) >> 8;
-                            int idistx = 256 - distx;
-                            uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
-                            uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
-                            b[i] = INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+                            b[i] = interpolate_4_pixels(tl, tr, bl, br, distx, disty);
                             fracX += fdx;
                         }
                     } else { //scale down
@@ -2003,12 +2009,8 @@ static const uint *QT_FASTCALL fetchTransformedBilinear(uint *buffer, const Oper
 
                         int distx = (fracX & 0x0000ffff) >> 8;
                         int disty = (fracY & 0x0000ffff) >> 8;
-                        int idistx = 256 - distx;
-                        int idisty = 256 - disty;
 
-                        uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
-                        uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
-                        b[i] = INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+                        b[i] = interpolate_4_pixels(tl, tr, bl, br, distx, disty);
                         fracX += fdx;
                         fracY += fdy;
                     }
@@ -2090,17 +2092,13 @@ static const uint *QT_FASTCALL fetchTransformedBilinear(uint *buffer, const Oper
             for (int i = 0; i < len; ++i) {
                 int distx = distxs[i];
                 int disty = distys[i];
-                int idistx = 256 - distx;
-                int idisty = 256 - disty;
 
                 uint tl = buf1[i * 2 + 0];
                 uint tr = buf1[i * 2 + 1];
                 uint bl = buf2[i * 2 + 0];
                 uint br = buf2[i * 2 + 1];
 
-                uint xtop = INTERPOLATE_PIXEL_256(tl, idistx, tr, distx);
-                uint xbot = INTERPOLATE_PIXEL_256(bl, idistx, br, distx);
-                b[i] = INTERPOLATE_PIXEL_256(xtop, idisty, xbot, disty);
+                b[i] = interpolate_4_pixels(tl, tr, bl, br, distx, disty);
             }
             length -= len;
             b += len;
@@ -5841,7 +5839,7 @@ inline void qt_bitmapblit_template(QRasterBuffer *rasterBuffer,
     }
 }
 
-static void qt_gradient_quint32(int count, const QSpan *spans, void *userData)
+static void qt_gradient_argb32(int count, const QSpan *spans, void *userData)
 {
     QSpanData *data = reinterpret_cast<QSpanData *>(userData);
 
@@ -5939,12 +5937,21 @@ static void qt_gradient_quint16(int count, const QSpan *spans, void *userData)
     }
 }
 
-inline static void qt_bitmapblit_quint32(QRasterBuffer *rasterBuffer,
+inline static void qt_bitmapblit_argb32(QRasterBuffer *rasterBuffer,
                                    int x, int y, quint32 color,
                                    const uchar *map,
                                    int mapWidth, int mapHeight, int mapStride)
 {
     qt_bitmapblit_template<quint32>(rasterBuffer, x,  y,  color,
+                                    map, mapWidth, mapHeight, mapStride);
+}
+
+inline static void qt_bitmapblit_rgba8888(QRasterBuffer *rasterBuffer,
+                                   int x, int y, quint32 color,
+                                   const uchar *map,
+                                   int mapWidth, int mapHeight, int mapStride)
+{
+    qt_bitmapblit_template<quint32>(rasterBuffer, x, y, ARGB2RGBA(color),
                                     map, mapWidth, mapHeight, mapStride);
 }
 
@@ -6059,11 +6066,11 @@ static inline void grayBlendPixel(quint32 *dst, int coverage, int sr, int sg, in
 }
 #endif
 
-static void qt_alphamapblit_quint32(QRasterBuffer *rasterBuffer,
-                                    int x, int y, quint32 color,
-                                    const uchar *map,
-                                    int mapWidth, int mapHeight, int mapStride,
-                                    const QClipData *clip)
+static void qt_alphamapblit_argb32(QRasterBuffer *rasterBuffer,
+                                   int x, int y, quint32 color,
+                                   const uchar *map,
+                                   int mapWidth, int mapHeight, int mapStride,
+                                   const QClipData *clip)
 {
     const quint32 c = color;
     const int destStride = rasterBuffer->bytesPerLine() / sizeof(quint32);
@@ -6154,10 +6161,19 @@ static void qt_alphamapblit_quint32(QRasterBuffer *rasterBuffer,
     }
 }
 
-static void qt_alphargbblit_quint32(QRasterBuffer *rasterBuffer,
-                                    int x, int y, quint32 color,
-                                    const uint *src, int mapWidth, int mapHeight, int srcStride,
-                                    const QClipData *clip)
+static void qt_alphamapblit_rgba8888(QRasterBuffer *rasterBuffer,
+                                     int x, int y, quint32 color,
+                                     const uchar *map,
+                                     int mapWidth, int mapHeight, int mapStride,
+                                     const QClipData *clip)
+{
+    qt_alphamapblit_argb32(rasterBuffer, x, y, ARGB2RGBA(color), map, mapWidth, mapHeight, mapStride, clip);
+}
+
+static void qt_alphargbblit_argb32(QRasterBuffer *rasterBuffer,
+                                   int x, int y, quint32 color,
+                                   const uint *src, int mapWidth, int mapHeight, int srcStride,
+                                   const QClipData *clip)
 {
     const quint32 c = color;
 
@@ -6298,28 +6314,28 @@ DrawHelper qDrawHelper[QImage::NImageFormats] =
     // Format_RGB32,
     {
         blend_color_argb,
-        qt_gradient_quint32,
-        qt_bitmapblit_quint32,
-        qt_alphamapblit_quint32,
-        qt_alphargbblit_quint32,
+        qt_gradient_argb32,
+        qt_bitmapblit_argb32,
+        qt_alphamapblit_argb32,
+        qt_alphargbblit_argb32,
         qt_rectfill_argb32
     },
     // Format_ARGB32,
     {
         blend_color_generic,
-        qt_gradient_quint32,
-        qt_bitmapblit_quint32,
-        qt_alphamapblit_quint32,
-        qt_alphargbblit_quint32,
+        qt_gradient_argb32,
+        qt_bitmapblit_argb32,
+        qt_alphamapblit_argb32,
+        qt_alphargbblit_argb32,
         qt_rectfill_nonpremul_argb32
     },
     // Format_ARGB32_Premultiplied
     {
         blend_color_argb,
-        qt_gradient_quint32,
-        qt_bitmapblit_quint32,
-        qt_alphamapblit_quint32,
-        qt_alphargbblit_quint32,
+        qt_gradient_argb32,
+        qt_bitmapblit_argb32,
+        qt_alphamapblit_argb32,
+        qt_alphargbblit_argb32,
         qt_rectfill_argb32
     },
     // Format_RGB16
@@ -6382,43 +6398,40 @@ DrawHelper qDrawHelper[QImage::NImageFormats] =
     // Format_RGBX8888
     {
         blend_color_generic,
-        qt_gradient_quint32,
-        qt_bitmapblit_quint32,
+        blend_src_generic,
+        qt_bitmapblit_rgba8888,
 #if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-        qt_alphamapblit_quint32,
-        qt_alphargbblit_quint32,
+        qt_alphamapblit_rgba8888,
 #else
         0,
-        0,
 #endif
+        0,
         qt_rectfill_rgba
     },
     // Format_RGBA8888
     {
         blend_color_generic,
-        qt_gradient_quint32,
-        qt_bitmapblit_quint32,
+        blend_src_generic,
+        qt_bitmapblit_rgba8888,
 #if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-        qt_alphamapblit_quint32,
-        qt_alphargbblit_quint32,
+        qt_alphamapblit_rgba8888,
 #else
         0,
-        0,
 #endif
+        0,
         qt_rectfill_nonpremul_rgba
     },
     // Format_RGB8888_Premultiplied
     {
         blend_color_generic,
-        qt_gradient_quint32,
-        qt_bitmapblit_quint32,
+        blend_src_generic,
+        qt_bitmapblit_rgba8888,
 #if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-        qt_alphamapblit_quint32,
-        qt_alphargbblit_quint32,
+        qt_alphamapblit_rgba8888,
 #else
         0,
-        0,
 #endif
+        0,
         qt_rectfill_rgba
     }
 };
@@ -6504,12 +6517,12 @@ void qInitDrawhelperAsm()
     qDrawHelper[QImage::Format_ARGB32].bitmapBlit = qt_bitmapblit32_sse2;
     qDrawHelper[QImage::Format_ARGB32_Premultiplied].bitmapBlit = qt_bitmapblit32_sse2;
     qDrawHelper[QImage::Format_RGB16].bitmapBlit = qt_bitmapblit16_sse2;
-    qDrawHelper[QImage::Format_RGBX8888].bitmapBlit = qt_bitmapblit32_sse2;
-    qDrawHelper[QImage::Format_RGBA8888].bitmapBlit = qt_bitmapblit32_sse2;
-    qDrawHelper[QImage::Format_RGBA8888_Premultiplied].bitmapBlit = qt_bitmapblit32_sse2;
+    qDrawHelper[QImage::Format_RGBX8888].bitmapBlit = qt_bitmapblit8888_sse2;
+    qDrawHelper[QImage::Format_RGBA8888].bitmapBlit = qt_bitmapblit8888_sse2;
+    qDrawHelper[QImage::Format_RGBA8888_Premultiplied].bitmapBlit = qt_bitmapblit8888_sse2;
 
     extern void qt_scale_image_argb32_on_argb32_sse2(uchar *destPixels, int dbpl,
-                                                     const uchar *srcPixels, int sbpl,
+                                                     const uchar *srcPixels, int sbpl, int srch,
                                                      const QRectF &targetRect,
                                                      const QRectF &sourceRect,
                                                      const QRect &clip,

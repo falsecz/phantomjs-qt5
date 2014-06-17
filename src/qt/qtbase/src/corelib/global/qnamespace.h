@@ -267,6 +267,8 @@ public:
         TextJustificationForced = 0x10000,
         TextForceLeftToRight = 0x20000,
         TextForceRightToLeft = 0x40000,
+        // Ensures that the longest variant is always used when computing the
+        // size of a multi-variant string.
         TextLongestVariant = 0x80000,
         TextBypassShaping = 0x100000
     };
@@ -516,6 +518,9 @@ public:
         AA_SynthesizeTouchForUnhandledMouseEvents = 11,
         AA_SynthesizeMouseForUnhandledTouchEvents = 12,
         AA_UseHighDpiPixmaps = 13,
+        AA_ForceRasterWidgets = 14,
+        AA_UseDesktopOpenGL = 15,
+        AA_UseOpenGLES = 16,
 
         // Add new attributes before this line
         AA_AttributeCount
@@ -1328,6 +1333,10 @@ public:
         ImAnchorPosition = 0x80,
         ImHints = 0x100,
         ImPreferredLanguage = 0x200,
+
+        ImAbsolutePosition = 0x400,
+        ImTextBeforeCursor = 0x800,
+        ImTextAfterCursor = 0x1000,
 
         ImPlatformData = 0x80000000,
         ImQueryInput = ImCursorRectangle | ImCursorPosition | ImSurroundingText |

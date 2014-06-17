@@ -681,7 +681,7 @@ void QCocoaEventDispatcherPrivate::cleanupModalSessions()
 {
     // Go through the list of modal sessions, and end those
     // that no longer has a window assosiated; no window means
-    // the the session has logically ended. The reason we wait like
+    // the session has logically ended. The reason we wait like
     // this to actually end the sessions for real (rather than at the
     // point they were marked as stopped), is that ending a session
     // when no other session runs below it on the stack will make cocoa
@@ -721,7 +721,6 @@ void QCocoaEventDispatcherPrivate::beginModalSession(QWindow *window)
     // setting currentModalSessionCached to zero, so that interrupt() calls
     // [NSApp abortModal] if another modal session is currently running
     Q_Q(QCocoaEventDispatcher);
-    q->interrupt();
 
     // Add a new, empty (null), NSModalSession to the stack.
     // It will become active the next time QEventDispatcher::processEvents is called.
@@ -734,6 +733,24 @@ void QCocoaEventDispatcherPrivate::beginModalSession(QWindow *window)
     cocoaModalSessionStack.push(info);
     updateChildrenWorksWhenModal();
     currentModalSessionCached = 0;
+    if (currentExecIsNSAppRun) {
+        QEvent *e = new QEvent(QEvent::User);
+        qApp->postEvent(q, e, Qt::HighEventPriority);
+    } else {
+        q->interrupt();
+    }
+}
+
+bool QCocoaEventDispatcher::event(QEvent *e)
+{
+    Q_D(QCocoaEventDispatcher);
+
+    if (e->type() == QEvent::User) {
+        d->q_func()->processEvents(QEventLoop::DialogExec | QEventLoop::EventLoopExec | QEventLoop::WaitForMoreEvents);
+        return true;
+    }
+
+    return QObject::event(e);
 }
 
 void QCocoaEventDispatcherPrivate::endModalSession(QWindow *window)

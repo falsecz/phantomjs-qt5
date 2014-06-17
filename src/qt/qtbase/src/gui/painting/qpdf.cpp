@@ -54,10 +54,15 @@
 #include <qimagewriter.h>
 #include "qbuffer.h"
 #include "QtCore/qdatetime.h"
-#include <QCryptographicHash>
 
 #ifndef QT_NO_COMPRESS
 #include <zlib.h>
+#endif
+
+#ifdef QT_NO_COMPRESS
+static const bool do_compress = false;
+#else
+static const bool do_compress = true;
 #endif
 
 // might be helpful for smooth transforms of images
@@ -1054,7 +1059,7 @@ void QPdfEngine::drawPath (const QPainterPath &p)
     if (!d->hasPen && !d->hasBrush)
         return;
 
-    if (d->simplePen) {
+    if (d->simplePen && d->opacity == 1.0) {
         // draw strokes natively in this case for better output
         *d->currentPage << QPdf::generatePath(p, QTransform(), d->hasBrush ? QPdf::FillAndStrokePath : QPdf::StrokePath);
     } else {
@@ -1082,35 +1087,22 @@ void QPdfEngine::drawPixmap (const QRectF &rectangle, const QPixmap &pixmap, con
 
     QRect sourceRect = sr.toRect();
     QPixmap pm = sourceRect != pixmap.rect() ? pixmap.copy(sourceRect) : pixmap;
-    QImage unscaled = pm.toImage();
-    QImage image = unscaled;
-
-    QRectF a = d->stroker.matrix.mapRect(rectangle);
-    QRectF c = d->paperRect();
-    int maxWidth = int(a.width() / c.width() * d->width() / 72.0 * d->imageDPI);
-    int maxHeight = int(a.height() / c.height() * d->height() / 72.0 * d->imageDPI);
-    if (image.width() > maxWidth || image.height() > maxHeight)
-        image = unscaled.scaled( image.size().boundedTo( QSize(maxWidth, maxHeight) ), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-
-    bool useScaled=true;
+    QImage image = pm.toImage();
     bool bitmap = true;
-    const int object = d->addImage(image, &bitmap, pm.cacheKey(), &unscaled, 0, &useScaled );
-    int width = useScaled?image.width():unscaled.width();
-    int height = useScaled?image.height():unscaled.height();
-
+    const int object = d->addImage(image, &bitmap, pm.cacheKey());
     if (object < 0)
         return;
 
     *d->currentPage << "q\n/GSa gs\n";
     *d->currentPage
-        << QPdf::generateMatrix(QTransform(rectangle.width() / width, 0, 0, rectangle.height() / height,
+        << QPdf::generateMatrix(QTransform(rectangle.width() / sr.width(), 0, 0, rectangle.height() / sr.height(),
                                            rectangle.x(), rectangle.y()) * (d->simplePen ? QTransform() : d->stroker.matrix));
     if (bitmap) {
         // set current pen as d->brush
         d->brush = d->pen.brush();
     }
     setBrush();
-    d->currentPage->streamImage(width, height, object);
+    d->currentPage->streamImage(image.width(), image.height(), object);
     *d->currentPage << "Q\n";
 
     d->brush = b;
@@ -1433,19 +1425,60 @@ QPaintEngine::Type QPdfEngine::type() const
     return QPaintEngine::Pdf;
 }
 
+void QPdfEngine::setResolution(int resolution)
+{
+    Q_D(QPdfEngine);
+    d->resolution = resolution;
+}
 
+int QPdfEngine::resolution() const
+{
+    Q_D(const QPdfEngine);
+    return d->resolution;
+}
 
+void QPdfEngine::setPageLayout(const QPageLayout &pageLayout)
+{
+    Q_D(QPdfEngine);
+    d->m_pageLayout = pageLayout;
+}
+
+void QPdfEngine::setPageSize(const QPageSize &pageSize)
+{
+    Q_D(QPdfEngine);
+    d->m_pageLayout.setPageSize(pageSize);
+}
+
+void QPdfEngine::setPageOrientation(QPageLayout::Orientation orientation)
+{
+    Q_D(QPdfEngine);
+    d->m_pageLayout.setOrientation(orientation);
+}
+
+void QPdfEngine::setPageMargins(const QMarginsF &margins, QPageLayout::Unit units)
+{
+    Q_D(QPdfEngine);
+    d->m_pageLayout.setUnits(units);
+    d->m_pageLayout.setMargins(margins);
+}
+
+QPageLayout QPdfEngine::pageLayout() const
+{
+    Q_D(const QPdfEngine);
+    return d->m_pageLayout;
+}
+
+// Metrics are in Device Pixels
 int QPdfEngine::metric(QPaintDevice::PaintDeviceMetric metricType) const
 {
     Q_D(const QPdfEngine);
     int val;
-    QRect r = d->pageRect();
     switch (metricType) {
     case QPaintDevice::PdmWidth:
-        val = r.width();
+        val = d->m_pageLayout.paintRectPixels(d->resolution).width();
         break;
     case QPaintDevice::PdmHeight:
-        val = r.height();
+        val = d->m_pageLayout.paintRectPixels(d->resolution).height();
         break;
     case QPaintDevice::PdmDpiX:
     case QPaintDevice::PdmDpiY:
@@ -1456,10 +1489,10 @@ int QPdfEngine::metric(QPaintDevice::PaintDeviceMetric metricType) const
         val = 1200;
         break;
     case QPaintDevice::PdmWidthMM:
-        val = qRound(r.width()*25.4/d->resolution);
+        val = qRound(d->m_pageLayout.paintRect(QPageLayout::Millimeter).width());
         break;
     case QPaintDevice::PdmHeightMM:
-        val = qRound(r.height()*25.4/d->resolution);
+        val = qRound(d->m_pageLayout.paintRect(QPageLayout::Millimeter).height());
         break;
     case QPaintDevice::PdmNumColors:
         val = INT_MAX;
@@ -1477,21 +1510,12 @@ int QPdfEngine::metric(QPaintDevice::PaintDeviceMetric metricType) const
     return val;
 }
 
-static inline QSizeF pageSizeToPostScriptPoints(const QSizeF &pageSizeMM)
-{
-#define Q_MM(n) int((n * 720 + 127) / 254)
-    return QSizeF(Q_MM(pageSizeMM.width()), Q_MM(pageSizeMM.height()));
-#undef Q_MM
-}
-
 QPdfEnginePrivate::QPdfEnginePrivate()
     : clipEnabled(false), allClipped(false), hasPen(true), hasBrush(false), simplePen(false),
       outDevice(0), ownsDevice(false),
-      fullPage(false), embedFonts(true),
-      landscape(false),
+      embedFonts(true),
       grayscale(false),
-      paperSize(pageSizeToPostScriptPoints(QSizeF(210, 297))), // A4
-      leftMargin(10), topMargin(10), rightMargin(10), bottomMargin(10) // ~3.5 mm
+      m_pageLayout(QPageSize(QPageSize::A4), QPageLayout::Portrait, QMarginsF(10, 10, 10, 10))
 {
     resolution = 1200;
     currentObject = 1;
@@ -1499,18 +1523,8 @@ QPdfEnginePrivate::QPdfEnginePrivate()
     stroker.stream = 0;
 
     streampos = 0;
-    doCompress = true;
-    imageDPI = 1400;
-    imageQuality = 94;
 
     stream = new QDataStream;
-    outlineRoot = NULL;
-    outlineCurrent = NULL;
-}
-
-void QPdfEnginePrivate::setPaperSize(const QSizeF &pageSizeMM)
-{
-    paperSize = pageSizeToPostScriptPoints(pageSizeMM);
 }
 
 bool QPdfEngine::begin(QPaintDevice *pdev)
@@ -1568,51 +1582,6 @@ bool QPdfEngine::begin(QPaintDevice *pdev)
 bool QPdfEngine::end()
 {
     Q_D(QPdfEngine);
-
-    if (d->outlineRoot) {
-        d->outlineRoot->obj = d->requestObject();
-        d->writeOutlineChildren(d->outlineRoot);
-        d->addXrefEntry(d->outlineRoot->obj);
-        d->xprintf("<</Type /Outlines /First %d 0 R\n/Last %d 0 R>>\nendobj\n",
-                   d->outlineRoot->firstChild->obj, d->outlineRoot->lastChild->obj);
-    }
-
-    if (d->formFields.size()) {
-        uint font = d->addXrefEntry(-1);
-        d->xprintf("<</Type/Font/Name/Helv/BaseFont/Helvetica/Subtype/Type1>>\n"
-                   "endobj\n");
-        d->addXrefEntry(d->formFieldList);
-        d->xprintf("<</Fields[");
-        foreach(const uint & i, d->formFields)
-           d->xprintf("%d 0 R ",i);
-        d->xprintf("]\n"
-                   "/DR<</Font<</Helv %d 0 R>>>>\n"
-                   "/DA(/Helv 0 Tf 0 g)\n"
-                   ">>\n"
-                   "endobj\n", font);
-    }
-
-    d->catalog = d->addXrefEntry(-1);
-    d->xprintf("<<\n"
-               "/Type /Catalog\n"
-               "/Pages %d 0 R\n", d->pageRoot);
-    if (d->outlineRoot)
-        d->xprintf("/Outlines %d 0 R\n"
-                   "/PageMode /UseOutlines\n", d->outlineRoot->obj);
-    if (d->formFields.size())
-        d->xprintf("/AcroForm %d 0 R\n", d->formFieldList);
-    if (d->anchors.size()) {
-        d->xprintf("/Dests <<\n");
-        for (QHash<QString, uint>::iterator i=d->anchors.begin();
-           i != d->anchors.end(); ++i) {
-            d->printAnchor(i.key());
-            d->xprintf(" %d 0 R\n", i.value());
-        }
-        d->xprintf(">>\n");
-    }
-    d->xprintf(">>\n"
-               "endobj\n");
-
     d->writeTail();
 
     d->stream->unsetDevice();
@@ -1634,80 +1603,10 @@ bool QPdfEngine::end()
 
 QPdfEnginePrivate::~QPdfEnginePrivate()
 {
-    if (outlineRoot)
-      delete outlineRoot;
     qDeleteAll(fonts);
     delete currentPage;
     delete stream;
 }
-
-void QPdfEnginePrivate::printAnchor(const QString &name) {
-    QByteArray a = name.toUtf8();
-    if (a.size() >= 127)
-        a = QCryptographicHash::hash(a,QCryptographicHash::Sha1);
-    xprintf("/");
-    for (int i=0; i < a.size(); ++i) {
-        unsigned char c = a[i];
-        if (('a' <= c && c <= 'z') ||
-            ('A' <= c && c <= 'Z') ||
-            ('0' <= c && c <= '9') ||
-            c == '.' || c == '_')
-            xprintf("%c", c);
-        else
-            xprintf("#%02x", c);
-    }
-}
-
-void QPdfEnginePrivate::writeOutlineChildren(OutlineItem * node) {
-    for (OutlineItem * i = node->firstChild; i != NULL; i = i->next)
-       i->obj = requestObject();
-    for (OutlineItem * i = node->firstChild; i != NULL; i = i->next) {
-       QPdfEnginePrivate::writeOutlineChildren(i);
-       addXrefEntry(i->obj);
-       xprintf("<</Title ");
-       printString(i->text);
-       xprintf("\n"
-               "  /Parent %d 0 R\n"
-               "  /Dest ", i->parent->obj);
-       printAnchor(i->anchor);
-       xprintf("\n  /Count 0\n");
-       if (i->next)
-           xprintf("  /Next %d 0 R\n", i->next->obj);
-       if (i->prev)
-           xprintf("  /Prev %d 0 R\n", i->prev->obj);
-       if (i->firstChild)
-           xprintf("  /First %d 0 R\n", i->firstChild->obj);
-       if (i->lastChild)
-           xprintf("  /Last %d 0 R\n", i->lastChild->obj);
-       xprintf(">>\n"
-               "endobj\n");
-    }
-}
-
-QRect QPdfEnginePrivate::paperRect() const
-{
-    int w = qRound(paperSize.width()*resolution/72.);
-    int h = qRound(paperSize.height()*resolution/72.);
-
-    if (!landscape)
-        return QRect(0, 0, w, h);
-    else
-        return QRect(0, 0, h, w);
-}
-
-QRect QPdfEnginePrivate::pageRect() const
-{
-    QRect r = paperRect();
-
-    if(!fullPage)
-        r.adjust(qRound(leftMargin*(resolution/72.)),
-                 qRound(topMargin*(resolution/72.)),
-                 -qRound(rightMargin*(resolution/72.)),
-                 -qRound(bottomMargin*(resolution/72.)));
-
-    return r;
-}
-
 
 void QPdfEnginePrivate::writeHeader()
 {
@@ -1717,9 +1616,14 @@ void QPdfEnginePrivate::writeHeader()
 
     writeInfo();
 
+    catalog = addXrefEntry(-1);
     pageRoot = requestObject();
+    xprintf("<<\n"
+            "/Type /Catalog\n"
+            "/Pages %d 0 R\n"
+            ">>\n"
+            "endobj\n", pageRoot);
 
-    formFieldList = -1;
     // graphics state
     graphicsState = addXrefEntry(-1);
     xprintf("<<\n"
@@ -1758,15 +1662,6 @@ void QPdfEnginePrivate::writeInfo()
             t.hour(),
             t.minute(),
             t.second());
-    QDateTime fake=now;
-    fake.setTimeSpec(Qt::UTC);
-    int offset = now.secsTo(fake);
-    if (offset == 0)
-        xprintf("Z)\n");
-    else if (offset < 0)
-        xprintf("-%02d'%02d')\n", (-offset)/60/60 , ((-offset)/60) % 60);
-    else if (offset > 0)
-        xprintf("+%02d'%02d')\n", offset/60/60 , (offset/60) % 60);
     xprintf(">>\n"
             "endobj\n");
 }
@@ -1852,7 +1747,7 @@ void QPdfEnginePrivate::embedFont(QFontSubset *font)
         s << "<<\n"
             "/Length1 " << fontData.size() << "\n"
             "/Length " << length_object << "0 R\n";
-        if (doCompress)
+        if (do_compress)
             s << "/Filter /FlateDecode\n";
         s << ">>\n"
             "stream\n";
@@ -1984,7 +1879,7 @@ void QPdfEnginePrivate::writePage()
     addXrefEntry(pageStream);
     xprintf("<<\n"
             "/Length %d 0 R\n", pageStreamLength); // object number for stream length object
-    if (doCompress)
+    if (do_compress)
         xprintf("/Filter /FlateDecode\n");
 
     xprintf(">>\n");
@@ -2081,7 +1976,7 @@ void QPdfEnginePrivate::xprintf(const char* fmt, ...)
 int QPdfEnginePrivate::writeCompressed(QIODevice *dev)
 {
 #ifndef QT_NO_COMPRESS
-    if (doCompress) {
+    if (do_compress) {
         int size = QPdfPage::chunkSize();
         int sum = 0;
         ::z_stream zStruct;
@@ -2155,7 +2050,7 @@ int QPdfEnginePrivate::writeCompressed(QIODevice *dev)
 int QPdfEnginePrivate::writeCompressed(const char *src, int len)
 {
 #ifndef QT_NO_COMPRESS
-    if(doCompress) {
+    if(do_compress) {
         uLongf destLen = len + len/100 + 13; // zlib requirement
         Bytef* dest = new Bytef[destLen];
         if (Z_OK == ::compress(dest, &destLen, (const Bytef*) src, (uLongf)len)) {
@@ -2208,7 +2103,7 @@ int QPdfEnginePrivate::writeImage(const QByteArray &data, int width, int height,
         write(data);
         len = data.length();
     } else {
-        if (doCompress)
+        if (do_compress)
             xprintf("/Filter /FlateDecode\n>>\nstream\n");
         else
             xprintf(">>\nstream\n");
@@ -2428,34 +2323,10 @@ int QPdfEnginePrivate::addBrushPattern(const QTransform &m, bool *specifyColor, 
     return patternObj;
 }
 
-
-void QPdfEnginePrivate::convertImage(const QImage & image, QByteArray & imageData) {
-    int w = image.width();
-    int h = image.height();
-    imageData.resize(grayscale ? w * h : 3 * w * h);
-    uchar *data = (uchar *)imageData.data();
-    for (int y = 0; y < h; ++y) {
-        const QRgb *rgb = (const QRgb *)image.scanLine(y);
-        if (grayscale) {
-            for (int x = 0; x < w; ++x) {
-                *(data++) = qGray(*rgb);
-                ++rgb;
-            }
-        } else {
-            for (int x = 0; x < w; ++x) {
-                *(data++) = qRed(*rgb);
-                *(data++) = qGreen(*rgb);
-                *(data++) = qBlue(*rgb);
-                ++rgb;
-            }
-        }
-    }
-}
-
 /*!
  * Adds an image to the pdf and return the pdf-object id. Returns -1 if adding the image failed.
  */
-int QPdfEnginePrivate::addImage(const QImage &img, bool *bitmap, qint64 serial_no, const QImage * noneScaled, const QByteArray * data, bool * useScaled)
+int QPdfEnginePrivate::addImage(const QImage &img, bool *bitmap, qint64 serial_no)
 {
     if (img.isNull())
         return -1;
@@ -2496,92 +2367,65 @@ int QPdfEnginePrivate::addImage(const QImage &img, bool *bitmap, qint64 serial_n
         }
         object = writeImage(data, w, h, d, 0, 0);
     } else {
-        QByteArray imageData;
-        uLongf target=1024*1024*1024;
-        bool uns=false;
-        bool dct = false;
-
-        if (QImageWriter::supportedImageFormats().contains("jpeg") && !grayscale) {
-            QByteArray imageData2;
-
-            QBuffer buffer(&imageData2);
-            QImageWriter writer(&buffer, "jpeg");
-            writer.setQuality(imageQuality);
-            writer.write(image);
-
-            if ((uLongf)imageData2.size() < target) {
-                imageData=imageData2;
-                target = imageData2.size();
-                dct = true;
-                uns=false;
-            }
-        }
-
-        if (noneScaled && noneScaled->rect() != image.rect()) {
-            QByteArray imageData2;
-            convertImage(*noneScaled, imageData2);
-            uLongf len = imageData2.size();
-            uLongf destLen = len + len/100 + 13; // zlib requirement
-            Bytef* dest = new Bytef[destLen];
-            if (Z_OK == ::compress(dest, &destLen, (const Bytef*) imageData2.data(), (uLongf)len) &&
-                (uLongf)destLen < target) {
-                imageData=imageData2;
-                target=destLen;
-                dct=false;
-                uns=true;
-            }
-            delete[] dest;
-        }
-
-        {
-            QByteArray imageData2;
-            convertImage(image, imageData2);
-            uLongf len = imageData2.size();
-            uLongf destLen = len + len/100 + 13; // zlib requirement
-            Bytef* dest = new Bytef[destLen];
-            if (Z_OK == ::compress(dest, &destLen, (const Bytef*) imageData2.data(), (uLongf)len) &&
-                (uLongf)destLen < target) {
-                imageData=imageData2;
-                target=destLen;
-                dct=false;
-                uns=false;
-            }
-            delete[] dest;
-        }
-
-        if (grayscale && noneScaled != 0 && data != 0 &&
-            data->size() > 2 && (unsigned char)data->data()[0] == 0xff && (unsigned char)data->data()[1] == 0xd8 &&
-            (uLongf)data->size()*10 < target*13) {
-            imageData = *data;
-            target=data->size();
-            dct=true;
-            uns=true;
-        }
-
-        if (uns) {
-            w = noneScaled->width();
-            h = noneScaled->height();
-        }
-        if (useScaled) *useScaled = (uns?false:true);
         QByteArray softMaskData;
+        bool dct = false;
+        QByteArray imageData;
         bool hasAlpha = false;
         bool hasMask = false;
 
-        if (format != QImage::Format_RGB32) {
+        if (QImageWriter::supportedImageFormats().contains("jpeg") && !grayscale) {
+            QBuffer buffer(&imageData);
+            QImageWriter writer(&buffer, "jpeg");
+            writer.setQuality(94);
+            writer.write(image);
+            dct = true;
+
+            if (format != QImage::Format_RGB32) {
+                softMaskData.resize(w * h);
+                uchar *sdata = (uchar *)softMaskData.data();
+                for (int y = 0; y < h; ++y) {
+                    const QRgb *rgb = (const QRgb *)image.scanLine(y);
+                    for (int x = 0; x < w; ++x) {
+                        uchar alpha = qAlpha(*rgb);
+                        *sdata++ = alpha;
+                        hasMask |= (alpha < 255);
+                        hasAlpha |= (alpha != 0 && alpha != 255);
+                        ++rgb;
+                    }
+                }
+            }
+        } else {
+            imageData.resize(grayscale ? w * h : 3 * w * h);
+            uchar *data = (uchar *)imageData.data();
             softMaskData.resize(w * h);
             uchar *sdata = (uchar *)softMaskData.data();
             for (int y = 0; y < h; ++y) {
-                const QRgb *rgb = (const QRgb *)(uns?noneScaled->scanLine(y):image.scanLine(y));
-                for (int x = 0; x < w; ++x) {
-                    uchar alpha = qAlpha(*rgb);
-                    *sdata++ = alpha;
-                    hasMask |= (alpha < 255);
-                    hasAlpha |= (alpha != 0 && alpha != 255);
-                    ++rgb;
+                const QRgb *rgb = (const QRgb *)image.scanLine(y);
+                if (grayscale) {
+                    for (int x = 0; x < w; ++x) {
+                        *(data++) = qGray(*rgb);
+                        uchar alpha = qAlpha(*rgb);
+                        *sdata++ = alpha;
+                        hasMask |= (alpha < 255);
+                        hasAlpha |= (alpha != 0 && alpha != 255);
+                        ++rgb;
+                    }
+                } else {
+                    for (int x = 0; x < w; ++x) {
+                        *(data++) = qRed(*rgb);
+                        *(data++) = qGreen(*rgb);
+                        *(data++) = qBlue(*rgb);
+                        uchar alpha = qAlpha(*rgb);
+                        *sdata++ = alpha;
+                        hasMask |= (alpha < 255);
+                        hasAlpha |= (alpha != 0 && alpha != 255);
+                        ++rgb;
+                    }
                 }
             }
+            if (format == QImage::Format_RGB32)
+                hasAlpha = hasMask = false;
         }
-
         int maskObject = 0;
         int softMaskObject = 0;
         if (hasAlpha) {
@@ -2773,9 +2617,9 @@ void QPdfEnginePrivate::drawTextItem(const QPointF &p, const QTextItemInt &ti)
 QTransform QPdfEnginePrivate::pageMatrix() const
 {
     qreal scale = 72./resolution;
-    QTransform tmp(scale, 0.0, 0.0, -scale, 0.0, height());
-    if (!fullPage) {
-        QRect r = pageRect();
+    QTransform tmp(scale, 0.0, 0.0, -scale, 0.0, m_pageLayout.fullRectPoints().height());
+    if (m_pageLayout.mode() != QPageLayout::FullPageMode) {
+        QRect r = m_pageLayout.paintRectPixels(resolution);
         tmp.translate(r.left(), r.top());
     }
     return tmp;
@@ -2784,12 +2628,12 @@ QTransform QPdfEnginePrivate::pageMatrix() const
 void QPdfEnginePrivate::newPage()
 {
     if (currentPage && currentPage->pageSize.isEmpty())
-        currentPage->pageSize = QSize(width(), height());
+        currentPage->pageSize = m_pageLayout.fullRectPoints().size();
     writePage();
 
     delete currentPage;
     currentPage = new QPdfPage;
-    currentPage->pageSize = QSize(width(), height());
+    currentPage->pageSize = m_pageLayout.fullRectPoints().size();
     stroker.stream = currentPage;
     pages.append(requestObject());
 

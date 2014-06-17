@@ -246,16 +246,15 @@ QMultiMap<QString,QString> outFileNames;
  */
 void Generator::writeOutFileNames()
 {
-    QFile* files = new QFile("/Users/msmith/depot/qt5/qtdoc/outputlist.txt");
-    files->open(QFile::WriteOnly);
-    QTextStream* filesout = new QTextStream(files);
+    QFile files("outputlist.txt");
+    if (!files.open(QFile::WriteOnly))
+        return;
+    QTextStream filesout(&files);
     QMultiMap<QString,QString>::ConstIterator i = outFileNames.begin();
     while (i != outFileNames.end()) {
-        (*filesout) << i.key() << "\n";
+        filesout << i.key() << "\n";
         ++i;
     }
-    filesout->flush();
-    files->close();
 }
 
 /*!
@@ -271,7 +270,7 @@ void Generator::beginSubPage(const InnerNode* node, const QString& fileName)
     path += fileName;
 
     QFile* outFile = new QFile(redirectDocumentationToDevNull_ ? QStringLiteral("/dev/null") : path);
-    if (outFile->exists())
+    if (!redirectDocumentationToDevNull_ && outFile->exists())
         node->location().error(tr("HTML file already exists; overwriting %1").arg(outFile->fileName()));
     if (!outFile->open(QFile::WriteOnly))
         node->location().fatal(tr("Cannot open output file '%1'").arg(outFile->fileName()));

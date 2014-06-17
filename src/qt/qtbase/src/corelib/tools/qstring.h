@@ -552,6 +552,7 @@ public:
     int localeAwareCompare(const QStringRef &s) const;
     static int localeAwareCompare(const QString& s1, const QStringRef& s2);
 
+    // ### Qt6: make inline except for the long long versions
     short  toShort(bool *ok=0, int base=10) const;
     ushort toUShort(bool *ok=0, int base=10) const;
     int toInt(bool *ok=0, int base=10) const;
@@ -710,7 +711,7 @@ public:
     Q_DECL_CONSTEXPR inline QString(QStringDataPtr dd) : d(dd.ptr) {}
 
 private:
-#if defined(QT_NO_CAST_FROM_ASCII) && !defined(Q_NO_DECLARED_NOT_DEFINED)
+#if defined(QT_NO_CAST_FROM_ASCII)
     QString &operator+=(const char *s);
     QString &operator+=(const QByteArray &s);
     QString(const char *ch);
@@ -746,6 +747,8 @@ private:
     static QByteArray toUtf8_helper(const QString &);
     static QByteArray toLocal8Bit_helper(const QChar *data, int size);
     static int toUcs4_helper(const ushort *uc, int length, uint *out);
+    static qlonglong toIntegral_helper(const QChar *data, int len, bool *ok, int base);
+    static qulonglong toIntegral_helper(const QChar *data, uint len, bool *ok, int base);
     void replace_helper(uint *indices, int nIndices, int blen, const QChar *after, int alen);
     friend class QCharRef;
     friend class QTextCodec;
@@ -753,6 +756,24 @@ private:
     friend class QByteArray;
     friend class QCollator;
     friend struct QAbstractConcatenable;
+
+    template <typename T> static
+    T toIntegral_helper(const QChar *data, int len, bool *ok, int base)
+    {
+        // ### Qt6: use std::conditional<std::is_unsigned<T>::value, qulonglong, qlonglong>::type
+        const bool isUnsigned = T(0) < T(-1);
+        typedef typename QtPrivate::QConditional<isUnsigned, qulonglong, qlonglong>::Type Int64;
+        typedef typename QtPrivate::QConditional<isUnsigned, uint, int>::Type Int32;
+
+        // we select the right overload by casting size() to int or uint
+        Int64 val = toIntegral_helper(data, Int32(len), ok, base);
+        if (T(val) != val) {
+            if (ok)
+                *ok = false;
+            val = 0;
+        }
+        return T(val);
+    }
 
 public:
     typedef Data * DataPtr;
@@ -849,6 +870,12 @@ inline QString QString::arg(const QString &a1, const QString &a2, const QString 
 inline QString QString::section(QChar asep, int astart, int aend, SectionFlags aflags) const
 { return section(QString(asep), astart, aend, aflags); }
 
+#ifdef Q_CC_MSVC
+// "conditional expression is constant"
+#pragma warning(push)
+#pragma warning(disable : 4127)
+#endif
+
 inline int QString::toWCharArray(wchar_t *array) const
 {
     if (sizeof(wchar_t) == sizeof(QChar)) {
@@ -857,6 +884,11 @@ inline int QString::toWCharArray(wchar_t *array) const
     }
     return toUcs4_helper(d->data(), size(), reinterpret_cast<uint *>(array));
 }
+
+#ifdef Q_CC_MSVC
+#pragma warning(pop)
+#endif
+
 inline QString QString::fromWCharArray(const wchar_t *string, int size)
 {
     return sizeof(wchar_t) == sizeof(QChar) ? fromUtf16(reinterpret_cast<const ushort *>(string), size)
@@ -922,6 +954,9 @@ public:
         case QChar::Joining_Causing: return QChar::Center;
         case QChar::Joining_Dual: return QChar::Dual;
         case QChar::Joining_Right: return QChar::Right;
+        case QChar::Joining_None:
+        case QChar::Joining_Left:
+        case QChar::Joining_Transparent:
         default: return QChar::OtherJoining;
         }
     }

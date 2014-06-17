@@ -2369,6 +2369,10 @@ void QConfFileSettingsPrivate::ensureSectionParsed(QConfFile *confFile,
     stored in the following registry path:
     \c{HKEY_LOCAL_MACHINE\Software\WOW6432node}.
 
+    On BlackBerry only a single file is used (see \l{Platform Limitations}).
+    If the file format is NativeFormat, this is "Settings/MySoft/Star Runner.conf"
+    in the application's home directory.
+
     If the file format is IniFormat, the following files are
     used on Unix and Mac OS X:
 
@@ -2393,8 +2397,12 @@ void QConfFileSettingsPrivate::ensureSectionParsed(QConfFile *confFile,
     %COMMON_APPDATA% path is usually \tt{C:\\Documents and
     Settings\\All Users\\Application Data}.
 
+    On BlackBerry only a single file is used (see \l{Platform Limitations}).
+    If the file format is IniFormat, this is "Settings/MySoft/Star Runner.ini"
+    in the application's home directory.
+
     The paths for the \c .ini and \c .conf files can be changed using
-    setPath(). On Unix and Mac OS X, the user can override them by by
+    setPath(). On Unix and Mac OS X, the user can override them by
     setting the \c XDG_CONFIG_HOME environment variable; see
     setPath() for details.
 
@@ -2488,6 +2496,12 @@ void QConfFileSettingsPrivate::ensureSectionParsed(QConfFile *confFile,
 
         \snippet code/src_corelib_io_qsettings.cpp 7
 
+    \li On Mac OS X, permissions to access settings not belonging to the
+       current user (i.e. SystemScope) have changed with 10.7 (Lion). Prior to
+       that version, users having admin rights could access these. For 10.7 and
+       10.8 (Mountain Lion), only root can. However, 10.9 (Mavericks) changes
+       that rule again but only for the native format (plist files).
+
     \li On Unix and Mac OS X systems, the advisory file locking is disabled
        if NFS (or AutoFS or CacheFS) is detected to work around a bug in the
        NFS fcntl() implementation, which hangs forever if statd or lockd aren't
@@ -2498,7 +2512,8 @@ void QConfFileSettingsPrivate::ensureSectionParsed(QConfFile *confFile,
        allowed to read or write outside of this sandbox. This involves the
        following limitations:
        \list
-       \li As there is only a single scope the scope is simply ignored.
+       \li As there is only a single scope the scope is simply ignored,
+           i.e. there is no difference between SystemScope and UserScope.
        \li The \l{Fallback Mechanism} is not applied, i.e. only a single
           location is considered.
        \li It is advised against setting and using custom file paths.

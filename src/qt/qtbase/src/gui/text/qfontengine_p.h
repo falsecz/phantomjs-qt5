@@ -60,11 +60,10 @@
 #include "private/qtextengine_p.h"
 #include "private/qfont_p.h"
 
-#include <private/qfontengineglyphcache_p.h>
-
 QT_BEGIN_NAMESPACE
 
 class QPainterPath;
+class QFontEngineGlyphCache;
 
 struct QGlyphLayout;
 
@@ -126,8 +125,9 @@ public:
     };
     Q_DECLARE_FLAGS(ShaperFlags, ShaperFlag)
 
-    QFontEngine();
     virtual ~QFontEngine();
+
+    inline Type type() const { return m_type; }
 
     // all of these are in unscaled metrics if the engine supports uncsaled metrics,
     // otherwise in design metrics
@@ -145,8 +145,8 @@ public:
     };
     virtual Properties properties() const;
     virtual void getUnscaledGlyph(glyph_t glyph, QPainterPath *path, glyph_metrics_t *metrics);
-    QByteArray getSfntTable(uint /*tag*/) const;
-    virtual bool getSfntTableData(uint /*tag*/, uchar * /*buffer*/, uint * /*length*/) const { return false; }
+    QByteArray getSfntTable(uint tag) const;
+    virtual bool getSfntTableData(uint tag, uchar *buffer, uint *length) const;
 
     struct FaceId {
         FaceId() : index(0), encoding(0) {}
@@ -168,6 +168,7 @@ public:
     virtual QFixed emSquareSize() const { return ascent(); }
 
     /* returns 0 as glyph index for non existent glyphs */
+    virtual glyph_t glyphIndex(uint ucs4) const = 0;
     virtual bool stringToCMap(const QChar *str, int len, QGlyphLayout *glyphs, int *nglyphs, ShaperFlags flags) const = 0;
     virtual void recalcAdvances(QGlyphLayout *, ShaperFlags) const {}
     virtual void doKerning(QGlyphLayout *, ShaperFlags) const;
@@ -225,28 +226,13 @@ public:
 
     virtual void getGlyphBearings(glyph_t glyph, qreal *leftBearing = 0, qreal *rightBearing = 0);
 
-    virtual const char *name() const = 0;
-
-    virtual bool canRender(const QChar *string, int len) = 0;
-    inline bool canRender(uint ucs4) {
-        QChar utf16[2];
-        int utf16len = 1;
-        if (QChar::requiresSurrogates(ucs4)) {
-            utf16[0] = QChar::highSurrogate(ucs4);
-            utf16[1] = QChar::lowSurrogate(ucs4);
-            ++utf16len;
-        } else {
-            utf16[0] = QChar(ucs4);
-        }
-        return canRender(utf16, utf16len);
-    }
+    inline bool canRender(uint ucs4) const { return glyphIndex(ucs4) != 0; }
+    virtual bool canRender(const QChar *str, int len) const;
 
     virtual bool supportsTransformation(const QTransform &transform) const;
 
-    virtual Type type() const = 0;
-
     virtual int glyphCount() const;
-    virtual int glyphMargin(QFontEngineGlyphCache::Type type) { return type == QFontEngineGlyphCache::Raster_RGBMask ? 2 : 0; }
+    virtual int glyphMargin(GlyphFormat format) { return format == Format_A32 ? 2 : 0; }
 
     virtual QFontEngine *cloneWithSize(qreal /*pixelSize*/) const { return 0; }
 
@@ -258,7 +244,7 @@ public:
 
     void clearGlyphCache(const void *key);
     void setGlyphCache(const void *key, QFontEngineGlyphCache *data);
-    QFontEngineGlyphCache *glyphCache(const void *key, QFontEngineGlyphCache::Type type, const QTransform &transform) const;
+    QFontEngineGlyphCache *glyphCache(const void *key, GlyphFormat format, const QTransform &transform) const;
 
     static const uchar *getCMap(const uchar *table, uint tableSize, bool *isSymbolFont, int *cmapSize);
     static quint32 getTrueTypeGlyphIndex(const uchar *cmap, uint unicode);
@@ -273,6 +259,10 @@ public:
     };
     virtual void setDefaultHintStyle(HintStyle) { }
 
+private:
+    const Type m_type;
+
+public:
     QAtomicInt ref;
     QFontDef fontDef;
 
@@ -300,19 +290,27 @@ public:
     QVector<KernPair> kerning_pairs;
     void loadKerningPairs(QFixed scalingFactor);
 
-    int glyphFormat;
+    GlyphFormat glyphFormat;
     QImage currentlyLockedAlphaMap;
     int m_subPixelPositionCount; // Number of positions within a single pixel for this cache
 
     inline QVariant userData() const { return m_userData; }
 
 protected:
+    explicit QFontEngine(Type type);
+
     QFixed lastRightBearing(const QGlyphLayout &glyphs, bool round = false);
 
     inline void setUserData(const QVariant &userData) { m_userData = userData; }
 
 private:
     struct GlyphCacheEntry {
+        GlyphCacheEntry();
+        GlyphCacheEntry(const GlyphCacheEntry &);
+        ~GlyphCacheEntry();
+
+        GlyphCacheEntry &operator=(const GlyphCacheEntry &);
+
         const void *context;
         QExplicitlySharedDataPointer<QFontEngineGlyphCache> cache;
         bool operator==(const GlyphCacheEntry &other) const { return context == other.context && cache == other.cache; }
@@ -347,6 +345,7 @@ public:
     QFontEngineBox(int size);
     ~QFontEngineBox();
 
+    virtual glyph_t glyphIndex(uint ucs4) const;
     virtual bool stringToCMap(const QChar *str, int len, QGlyphLayout *glyphs, int *nglyphs, ShaperFlags flags) const;
     virtual void recalcAdvances(QGlyphLayout *, ShaperFlags) const;
 
@@ -365,12 +364,12 @@ public:
     virtual qreal minRightBearing() const { return 0; }
     virtual QImage alphaMapForGlyph(glyph_t);
 
-    virtual const char *name() const;
+    virtual bool canRender(const QChar *string, int len) const;
 
-    virtual bool canRender(const QChar *string, int len);
-
-    virtual Type type() const;
     inline int size() const { return _size; }
+
+protected:
+    explicit QFontEngineBox(Type type, int size);
 
 private:
     friend class QFontPrivate;
@@ -383,6 +382,7 @@ public:
     explicit QFontEngineMulti(int engineCount);
     ~QFontEngineMulti();
 
+    virtual glyph_t glyphIndex(uint ucs4) const;
     virtual bool stringToCMap(const QChar *str, int len, QGlyphLayout *glyphs, int *nglyphs, ShaperFlags flags) const;
 
     virtual glyph_metrics_t boundingBox(const QGlyphLayout &glyphs);
@@ -410,12 +410,7 @@ public:
     virtual qreal minLeftBearing() const;
     virtual qreal minRightBearing() const;
 
-    virtual inline Type type() const
-    { return QFontEngine::Multi; }
-
-    virtual bool canRender(const QChar *string, int len);
-    inline virtual const char *name() const
-    { return "Multi"; }
+    virtual bool canRender(const QChar *string, int len) const;
 
     QFontEngine *engine(int at) const
     {Q_ASSERT(at < engines.size()); return engines.at(at); }
@@ -439,8 +434,7 @@ protected:
 class QTestFontEngine : public QFontEngineBox
 {
 public:
-    QTestFontEngine(int size);
-    virtual Type type() const;
+    inline QTestFontEngine(int size) : QFontEngineBox(TestFontEngine, size) {}
 };
 
 QT_END_NAMESPACE

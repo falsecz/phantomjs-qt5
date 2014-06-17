@@ -50,7 +50,7 @@
 
 #include <qpa/qplatformwindow.h>
 
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
 #  include <QtCore/QSharedPointer>
 #  include <EGL/egl.h>
 #endif
@@ -60,7 +60,7 @@ QT_BEGIN_NAMESPACE
 class QWindowsOleDropTarget;
 class QDebug;
 
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
 class QWindowsEGLStaticContext;
 #endif
 
@@ -130,7 +130,7 @@ struct QWindowsWindowData
 class QWindowsWindow : public QPlatformWindow
 {
 public:
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
     typedef QSharedPointer<QWindowsEGLStaticContext> QWindowsEGLStaticContextPtr;
 #endif
 
@@ -153,7 +153,8 @@ public:
         AlertState = 0x8000,
         Exposed = 0x10000,
         WithinCreate = 0x20000,
-        WithinMaximize = 0x40000
+        WithinMaximize = 0x40000,
+        MaximizeToFullScreen = 0x80000
     };
 
     QWindowsWindow(QWindow *window, const QWindowsWindowData &data);
@@ -206,7 +207,7 @@ public:
     QMargins customMargins() const { return m_data.customMargins; }
     void setCustomMargins(const QMargins &m);
 
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
     EGLSurface eglSurfaceHandle() const { return m_eglSurface;}
     EGLSurface ensureEglSurfaceHandle(const QWindowsEGLStaticContextPtr &staticContext, EGLConfig config);
 #endif
@@ -301,7 +302,7 @@ private:
     unsigned m_savedStyle;
     QRect m_savedFrameGeometry;
     const QSurfaceFormat m_format;
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
     EGLSurface m_eglSurface;
     QSharedPointer<QWindowsEGLStaticContext> m_staticEglContext;
 #endif

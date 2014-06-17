@@ -45,6 +45,8 @@
 #include <QtCore/qvariant.h>
 #include <QtPrintSupport/qprinter.h>
 
+Q_DECLARE_METATYPE(QMarginsF)
+
 QT_BEGIN_NAMESPACE
 
 
@@ -85,11 +87,11 @@ public:
         PPK_CopyCount,
         PPK_SupportsMultipleCopies,
         PPK_PaperName,
-
-        PPK_UseCompression,
-        PPK_ImageQuality,
-        PPK_ImageDPI,
+        PPK_QPageSize,
+        PPK_QPageMargins,
+        PPK_QPageLayout,
         PPK_PaperSize = PPK_PageSize,
+
         PPK_CustomBase = 0xff00
     };
 
@@ -97,8 +99,6 @@ public:
     virtual QVariant property(PrintEnginePropertyKey key) const = 0;
 
     virtual bool newPage() = 0;
-    virtual void beginSectionOutline(const QString &text, const QString &anchor) {Q_UNUSED(text); Q_UNUSED(anchor);}
-    virtual void endSectionOutline() {}
     virtual bool abort() = 0;
 
     virtual int metric(QPaintDevice::PaintDeviceMetric) const = 0;

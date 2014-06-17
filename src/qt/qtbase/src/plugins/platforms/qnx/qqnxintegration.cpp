@@ -63,7 +63,7 @@
 #if defined(Q_OS_BLACKBERRY)
 #include "qqnxbpseventfilter.h"
 #include "qqnxnavigatorbps.h"
-#include "qqnxtheme.h"
+#include "qblackberrytheme.h"
 #include "qqnxvirtualkeyboardbps.h"
 #elif defined(QQNX_PPS)
 #include "qqnxnavigatorpps.h"
@@ -162,7 +162,7 @@ QQnxIntegration::QQnxIntegration(const QStringList &paramList)
 #else
     , m_eventDispatcher(createUnixEventDispatcher())
 #endif
-    , m_nativeInterface(new QQnxNativeInterface())
+    , m_nativeInterface(new QQnxNativeInterface(this))
     , m_screenEventHandler(new QQnxScreenEventHandler(this))
 #if !defined(QT_NO_CLIPBOARD)
     , m_clipboard(0)
@@ -462,15 +462,15 @@ QPlatformServices * QQnxIntegration::services() const
 #if defined(Q_OS_BLACKBERRY)
 QStringList QQnxIntegration::themeNames() const
 {
-    return QStringList(QQnxTheme::name());
+    return QStringList(QBlackberryTheme::name());
 }
 
 QPlatformTheme *QQnxIntegration::createPlatformTheme(const QString &name) const
 {
     qIntegrationDebug() << Q_FUNC_INFO << "name =" << name;
-    if (name == QQnxTheme::name())
-        return new QQnxTheme(this);
-    return QPlatformIntegration::createPlatformTheme(name);
+    if (name == QBlackberryTheme::name())
+        return new QBlackberryTheme(this);
+    return 0;
 }
 #endif
 
@@ -595,6 +595,11 @@ QQnxIntegration::Options QQnxIntegration::options()
 screen_context_t QQnxIntegration::screenContext()
 {
     return ms_screenContext;
+}
+
+QQnxNavigatorEventHandler *QQnxIntegration::navigatorEventHandler()
+{
+    return m_navigatorEventHandler;
 }
 
 screen_context_t QQnxIntegration::ms_screenContext = 0;

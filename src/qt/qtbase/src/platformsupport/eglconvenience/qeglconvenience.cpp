@@ -40,6 +40,7 @@
 ****************************************************************************/
 
 #include <QByteArray>
+#include <QOpenGLContext>
 
 #ifdef Q_OS_LINUX
 #include <sys/ioctl.h>
@@ -48,6 +49,10 @@
 #endif
 
 #include "qeglconvenience_p.h"
+
+#ifndef EGL_OPENGL_ES3_BIT_KHR
+#define EGL_OPENGL_ES3_BIT_KHR 0x0040
+#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -77,16 +82,7 @@ QVector<EGLint> q_createConfigAttributesFromFormat(const QSurfaceFormat &format)
     // put in the list before 32-bit configs. So, to make sure 16-bit is preffered over 32-bit,
     // we must set the red/green/blue sizes to zero. This has an unfortunate consequence that
     // if the application sets the red/green/blue size to 5/6/5 on the QSurfaceFormat,
-    // they will probably get a 32-bit config, even when there's an RGB565 config available.
-
-//    // Now normalize the values so -1 becomes 0
-//    redSize   = redSize   > 0 ? redSize   : 0;
-//    greenSize = greenSize > 0 ? greenSize : 0;
-//    blueSize  = blueSize  > 0 ? blueSize  : 0;
-//    alphaSize = alphaSize > 0 ? alphaSize : 0;
-//    depthSize = depthSize > 0 ? depthSize : 0;
-//    stencilSize = stencilSize > 0 ? stencilSize : 0;
-//    sampleCount = sampleCount > 0 ? sampleCount : 0;
+    // they might still get a 32-bit config, even when there's an RGB565 config available.
 
     QVector<EGLint> configAttributes;
 
@@ -238,17 +234,23 @@ EGLConfig QEglConfigChooser::chooseConfig()
     configureAttributes.append(surfaceType());
 
     configureAttributes.append(EGL_RENDERABLE_TYPE);
+    bool needsES2Plus = false;
     switch (m_format.renderableType()) {
     case QSurfaceFormat::OpenVG:
         configureAttributes.append(EGL_OPENVG_BIT);
         break;
 #ifdef EGL_VERSION_1_4
-#  if !defined(QT_OPENGL_ES_2)
     case QSurfaceFormat::DefaultRenderableType:
-#  endif
-    case QSurfaceFormat::OpenGL:
-        configureAttributes.append(EGL_OPENGL_BIT);
+#ifndef QT_NO_OPENGL
+        if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGL)
+            configureAttributes.append(EGL_OPENGL_BIT);
+        else
+#endif // QT_NO_OPENGL
+            needsES2Plus = true;
         break;
+    case QSurfaceFormat::OpenGL:
+         configureAttributes.append(EGL_OPENGL_BIT);
+         break;
 #endif
     case QSurfaceFormat::OpenGLES:
         if (m_format.majorVersion() == 1) {
@@ -257,8 +259,14 @@ EGLConfig QEglConfigChooser::chooseConfig()
         }
         // fall through
     default:
-        configureAttributes.append(EGL_OPENGL_ES2_BIT);
+        needsES2Plus = true;
         break;
+    }
+    if (needsES2Plus) {
+        if (m_format.majorVersion() >= 3 && q_hasEglExtension(display(), "EGL_KHR_create_context"))
+            configureAttributes.append(EGL_OPENGL_ES3_BIT_KHR);
+        else
+            configureAttributes.append(EGL_OPENGL_ES2_BIT);
     }
     configureAttributes.append(EGL_NONE);
 
@@ -353,11 +361,14 @@ QSurfaceFormat q_glFormatFromConfig(EGLDisplay display, const EGLConfig config, 
     if (referenceFormat.renderableType() == QSurfaceFormat::OpenVG && (renderableType & EGL_OPENVG_BIT))
         format.setRenderableType(QSurfaceFormat::OpenVG);
 #ifdef EGL_VERSION_1_4
-    else if ((referenceFormat.renderableType() == QSurfaceFormat::OpenGL
-#  if !defined(QT_OPENGL_ES_2)
-              || referenceFormat.renderableType() == QSurfaceFormat::DefaultRenderableType
-#  endif
-              ) && (renderableType & EGL_OPENGL_BIT))
+    else if (referenceFormat.renderableType() == QSurfaceFormat::OpenGL
+             && (renderableType & EGL_OPENGL_BIT))
+        format.setRenderableType(QSurfaceFormat::OpenGL);
+    else if (referenceFormat.renderableType() == QSurfaceFormat::DefaultRenderableType
+#ifndef QT_NO_OPENGL
+             && QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGL
+#endif
+             && (renderableType & EGL_OPENGL_BIT))
         format.setRenderableType(QSurfaceFormat::OpenGL);
 #endif
     else
@@ -426,11 +437,9 @@ void q_printEglConfig(EGLDisplay display, EGLConfig config)
     for (index = 0; attrs[index].attr != -1; ++index) {
         EGLint value;
         if (eglGetConfigAttrib(display, config, attrs[index].attr, &value)) {
-            qWarning("\t%s: %d\n", attrs[index].name, (int)value);
+            qDebug("\t%s: %d", attrs[index].name, (int)value);
         }
     }
-
-    qWarning("\n");
 }
 
 #ifdef Q_OS_LINUX

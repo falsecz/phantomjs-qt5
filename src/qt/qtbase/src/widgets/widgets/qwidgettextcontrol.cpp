@@ -115,7 +115,11 @@ static QTextLine currentTextLine(const QTextCursor &cursor)
 
 QWidgetTextControlPrivate::QWidgetTextControlPrivate()
     : doc(0), cursorOn(false), cursorIsFocusIndicator(false),
+#ifndef Q_OS_ANDROID
       interactionFlags(Qt::TextEditorInteraction),
+#else
+      interactionFlags(Qt::TextEditable),
+#endif
       dragEnabled(true),
 #ifndef QT_NO_DRAGANDDROP
       mousePressed(false), mightStartDrag(false),
@@ -231,9 +235,6 @@ bool QWidgetTextControlPrivate::cursorMoveKeyEvent(QKeyEvent *e)
     }
     else if (e == QKeySequence::MoveToNextLine) {
             op = QTextCursor::Down;
-    }
-    else if (e == QKeySequence::MoveToPreviousLine) {
-            op = QTextCursor::Up;
     }
     else if (e == QKeySequence::MoveToPreviousLine) {
             op = QTextCursor::Up;
@@ -499,6 +500,8 @@ void QWidgetTextControlPrivate::setContent(Qt::TextFormat format, const QString 
 
     q->ensureCursorVisible();
     emit q->cursorPositionChanged();
+
+    QObject::connect(doc, SIGNAL(contentsChange(int,int,int)), q, SLOT(_q_contentsChanged(int,int,int)), Qt::UniqueConnection);
 }
 
 void QWidgetTextControlPrivate::startDrag()
@@ -638,6 +641,34 @@ void QWidgetTextControlPrivate::_q_emitCursorPosChanged(const QTextCursor &someC
         emit q->cursorPositionChanged();
         emit q->microFocusChanged();
     }
+}
+
+void QWidgetTextControlPrivate::_q_contentsChanged(int from, int charsRemoved, int charsAdded)
+{
+    Q_Q(QWidgetTextControl);
+#ifndef QT_NO_ACCESSIBILITY
+
+    if (QAccessible::isActive() && q->parent() && q->parent()->isWidgetType()) {
+        QTextCursor tmp(doc);
+        tmp.setPosition(from);
+        tmp.setPosition(from + charsAdded, QTextCursor::KeepAnchor);
+        QString newText = tmp.selectedText();
+
+        // always report the right number of removed chars, but in lack of the real string use spaces
+        QString oldText = QString(charsRemoved, QLatin1Char(' '));
+
+        QAccessibleEvent *ev = 0;
+        if (charsRemoved == 0) {
+            ev = new QAccessibleTextInsertEvent(q->parent(), from, newText);
+        } else if (charsAdded == 0) {
+            ev = new QAccessibleTextRemoveEvent(q->parent(), from, oldText);
+        } else {
+            ev = new QAccessibleTextUpdateEvent(q->parent(), from, oldText, newText);
+        }
+        QAccessible::updateAccessibility(ev);
+        delete ev;
+    }
+#endif
 }
 
 void QWidgetTextControlPrivate::_q_documentLayoutChanged()
@@ -2024,7 +2055,7 @@ void QWidgetTextControlPrivate::inputMethodEvent(QInputMethodEvent *e)
         emit q->microFocusChanged();
 }
 
-QVariant QWidgetTextControl::inputMethodQuery(Qt::InputMethodQuery property) const
+QVariant QWidgetTextControl::inputMethodQuery(Qt::InputMethodQuery property, QVariant argument) const
 {
     Q_D(const QWidgetTextControl);
     QTextBlock block = d->cursor.block();
@@ -2043,6 +2074,47 @@ QVariant QWidgetTextControl::inputMethodQuery(Qt::InputMethodQuery property) con
         return QVariant(); // No limit.
     case Qt::ImAnchorPosition:
         return QVariant(d->cursor.anchor() - block.position());
+    case Qt::ImAbsolutePosition:
+        return QVariant(d->cursor.position());
+    case Qt::ImTextAfterCursor:
+    {
+        int maxLength = argument.isValid() ? argument.toInt() : 1024;
+        QTextCursor tmpCursor = d->cursor;
+        int localPos = d->cursor.position() - block.position();
+        QString result = block.text().mid(localPos);
+        while (result.length() < maxLength) {
+            int currentBlock = tmpCursor.blockNumber();
+            tmpCursor.movePosition(QTextCursor::NextBlock);
+            if (tmpCursor.blockNumber() == currentBlock)
+                break;
+            result += QLatin1Char('\n') + tmpCursor.block().text();
+        }
+        return QVariant(result);
+    }
+    case Qt::ImTextBeforeCursor:
+    {
+        int maxLength = argument.isValid() ? argument.toInt() : 1024;
+        QTextCursor tmpCursor = d->cursor;
+        int localPos = d->cursor.position() - block.position();
+        int numBlocks = 0;
+        int resultLen = localPos;
+        while (resultLen < maxLength) {
+            int currentBlock = tmpCursor.blockNumber();
+            tmpCursor.movePosition(QTextCursor::PreviousBlock);
+            if (tmpCursor.blockNumber() == currentBlock)
+                break;
+            numBlocks++;
+            resultLen += tmpCursor.block().length();
+        }
+        QString result;
+        while (numBlocks) {
+            result += tmpCursor.block().text() + QLatin1Char('\n');
+            tmpCursor.movePosition(QTextCursor::NextBlock);
+            --numBlocks;
+        }
+        result += block.text().mid(0,localPos);
+        return QVariant(result);
+    }
     default:
         return QVariant();
     }

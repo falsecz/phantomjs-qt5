@@ -178,12 +178,13 @@ const QKeyBinding QPlatformThemePrivate::keyBindings[] = {
     {QKeySequence::Close,                   0,          Qt::CTRL | Qt::Key_W,                   KB_Win | KB_X11},
     {QKeySequence::Save,                    1,          Qt::CTRL | Qt::Key_S,                   KB_All},
     {QKeySequence::New,                     1,          Qt::CTRL | Qt::Key_N,                   KB_All},
-    {QKeySequence::Delete,                  0,          Qt::META | Qt::Key_D,                   KB_Mac},
     {QKeySequence::Delete,                  0,          Qt::CTRL | Qt::Key_D,                   KB_X11}, //emacs (line edit only)
     {QKeySequence::Delete,                  1,          Qt::Key_Delete,                         KB_All},
+    {QKeySequence::Delete,                  0,          Qt::META | Qt::Key_D,                   KB_Mac},
     {QKeySequence::Cut,                     1,          Qt::CTRL | Qt::Key_X,                   KB_All},
     {QKeySequence::Cut,                     0,          Qt::SHIFT | Qt::Key_Delete,             KB_Win | KB_X11}, //## Check if this should work on mac
     {QKeySequence::Cut,                     0,          Qt::Key_F20,                            KB_X11}, //Cut on sun keyboards
+    {QKeySequence::Cut,                     0,          Qt::META | Qt::Key_K,                   KB_Mac},
     {QKeySequence::Copy,                    0,          Qt::CTRL | Qt::Key_Insert,              KB_X11 | KB_Win},
     {QKeySequence::Copy,                    1,          Qt::CTRL | Qt::Key_C,                   KB_All},
     {QKeySequence::Copy,                    0,          Qt::Key_F16,                            KB_X11}, //Copy on sun keyboards
@@ -191,6 +192,7 @@ const QKeyBinding QPlatformThemePrivate::keyBindings[] = {
     {QKeySequence::Paste,                   1,          Qt::CTRL | Qt::Key_V,                   KB_All},
     {QKeySequence::Paste,                   0,          Qt::SHIFT | Qt::Key_Insert,             KB_Win | KB_X11},
     {QKeySequence::Paste,                   0,          Qt::Key_F18,                            KB_X11}, //Paste on sun keyboards
+    {QKeySequence::Paste,                   0,          Qt::META | Qt::Key_Y,                   KB_Mac},
     {QKeySequence::Undo,                    0,          Qt::ALT  | Qt::Key_Backspace,           KB_Win},
     {QKeySequence::Undo,                    1,          Qt::CTRL | Qt::Key_Z,                   KB_All},
     {QKeySequence::Undo,                    0,          Qt::Key_F14,                            KB_X11}, //Undo on sun keyboards
@@ -241,16 +243,21 @@ const QKeyBinding QPlatformThemePrivate::keyBindings[] = {
     {QKeySequence::Bold,                    1,          Qt::CTRL | Qt::Key_B,                   KB_All},
     {QKeySequence::Italic,                  0,          Qt::CTRL | Qt::Key_I,                   KB_All},
     {QKeySequence::Underline,               1,          Qt::CTRL | Qt::Key_U,                   KB_All},
-    {QKeySequence::MoveToNextChar,          0,          Qt::Key_Right,                          KB_All},
-    {QKeySequence::MoveToPreviousChar,      0,          Qt::Key_Left,                           KB_All},
+    {QKeySequence::MoveToNextChar,          1,          Qt::Key_Right,                          KB_All},
+    {QKeySequence::MoveToNextChar,          0,          Qt::META | Qt::Key_F,                   KB_Mac},
+    {QKeySequence::MoveToPreviousChar,      1,          Qt::Key_Left,                           KB_All},
+    {QKeySequence::MoveToPreviousChar,      0,          Qt::META | Qt::Key_B,                   KB_Mac},
     {QKeySequence::MoveToNextWord,          0,          Qt::ALT  | Qt::Key_Right,               KB_Mac},
     {QKeySequence::MoveToNextWord,          0,          Qt::CTRL | Qt::Key_Right,               KB_Win | KB_X11},
     {QKeySequence::MoveToPreviousWord,      0,          Qt::ALT  | Qt::Key_Left,                KB_Mac},
     {QKeySequence::MoveToPreviousWord,      0,          Qt::CTRL | Qt::Key_Left,                KB_Win | KB_X11},
-    {QKeySequence::MoveToNextLine,          0,          Qt::Key_Down,                           KB_All},
-    {QKeySequence::MoveToPreviousLine,      0,          Qt::Key_Up,                             KB_All},
+    {QKeySequence::MoveToNextLine,          1,          Qt::Key_Down,                           KB_All},
+    {QKeySequence::MoveToNextLine,          0,          Qt::META | Qt::Key_N,                   KB_Mac},
+    {QKeySequence::MoveToPreviousLine,      1,          Qt::Key_Up,                             KB_All},
+    {QKeySequence::MoveToPreviousLine,      0,          Qt::META | Qt::Key_P,                   KB_Mac},
     {QKeySequence::MoveToNextPage,          0,          Qt::META | Qt::Key_PageDown,            KB_Mac},
     {QKeySequence::MoveToNextPage,          0,          Qt::META | Qt::Key_Down,                KB_Mac},
+    {QKeySequence::MoveToNextPage,          0,          Qt::META | Qt::Key_V,                   KB_Mac},
     {QKeySequence::MoveToNextPage,          0,          Qt::ALT  | Qt::Key_PageDown,            KB_Mac },
     {QKeySequence::MoveToNextPage,          1,          Qt::Key_PageDown,                       KB_All},
     {QKeySequence::MoveToPreviousPage,      0,          Qt::META | Qt::Key_PageUp,              KB_Mac},
@@ -265,9 +272,9 @@ const QKeyBinding QPlatformThemePrivate::keyBindings[] = {
     {QKeySequence::MoveToEndOfLine,         0,          Qt::Key_End,                            KB_Win | KB_X11},
     {QKeySequence::MoveToEndOfLine,         0,          Qt::CTRL + Qt::Key_E,                   KB_X11},
     {QKeySequence::MoveToStartOfBlock,      0,          Qt::META | Qt::Key_A,                   KB_Mac},
-    {QKeySequence::MoveToStartOfBlock,      0,          Qt::ALT  | Qt::Key_Up,                  KB_Mac}, //mac only
+    {QKeySequence::MoveToStartOfBlock,      1,          Qt::ALT  | Qt::Key_Up,                  KB_Mac}, //mac only
     {QKeySequence::MoveToEndOfBlock,        0,          Qt::META | Qt::Key_E,                   KB_Mac},
-    {QKeySequence::MoveToEndOfBlock,        0,          Qt::ALT  | Qt::Key_Down,                KB_Mac}, //mac only
+    {QKeySequence::MoveToEndOfBlock,        1,          Qt::ALT  | Qt::Key_Down,                KB_Mac}, //mac only
     {QKeySequence::MoveToStartOfDocument,   1,          Qt::CTRL | Qt::Key_Up,                  KB_Mac},
     {QKeySequence::MoveToStartOfDocument,   0,          Qt::CTRL | Qt::Key_Home,                KB_Win | KB_X11},
     {QKeySequence::MoveToStartOfDocument,   0,          Qt::Key_Home,                           KB_Mac},
@@ -290,10 +297,10 @@ const QKeyBinding QPlatformThemePrivate::keyBindings[] = {
     {QKeySequence::SelectEndOfLine,         0,          Qt::META | Qt::SHIFT | Qt::Key_Right,   KB_Mac},
     {QKeySequence::SelectEndOfLine,         1,          Qt::CTRL | Qt::SHIFT | Qt::Key_Right,   KB_Mac },
     {QKeySequence::SelectEndOfLine,         0,          Qt::SHIFT | Qt::Key_End,                KB_Win | KB_X11},
+    {QKeySequence::SelectStartOfBlock,      1,          Qt::ALT  | Qt::SHIFT | Qt::Key_Up,      KB_Mac}, //mac only
     {QKeySequence::SelectStartOfBlock,      0,          Qt::META | Qt::SHIFT | Qt::Key_A,       KB_Mac},
-    {QKeySequence::SelectStartOfBlock,      0,          Qt::ALT  | Qt::SHIFT | Qt::Key_Up,      KB_Mac}, //mac only
+    {QKeySequence::SelectEndOfBlock,        1,          Qt::ALT  | Qt::SHIFT | Qt::Key_Down,    KB_Mac}, //mac only
     {QKeySequence::SelectEndOfBlock,        0,          Qt::META | Qt::SHIFT | Qt::Key_E,       KB_Mac},
-    {QKeySequence::SelectEndOfBlock,        0,          Qt::ALT  | Qt::SHIFT | Qt::Key_Down,    KB_Mac}, //mac only
     {QKeySequence::SelectStartOfDocument,   1,          Qt::CTRL | Qt::SHIFT | Qt::Key_Up,      KB_Mac},
     {QKeySequence::SelectStartOfDocument,   0,          Qt::CTRL | Qt::SHIFT | Qt::Key_Home,    KB_Win | KB_X11},
     {QKeySequence::SelectStartOfDocument,   0,          Qt::SHIFT | Qt::Key_Home,               KB_Mac},
@@ -311,6 +318,7 @@ const QKeyBinding QPlatformThemePrivate::keyBindings[] = {
     {QKeySequence::InsertLineSeparator,     0,          Qt::META | Qt::Key_Return,              KB_Mac},
     {QKeySequence::InsertLineSeparator,     0,          Qt::SHIFT | Qt::Key_Enter,              KB_All},
     {QKeySequence::InsertLineSeparator,     0,          Qt::SHIFT | Qt::Key_Return,             KB_All},
+    {QKeySequence::InsertLineSeparator,     0,          Qt::META | Qt::Key_O,                   KB_Mac},
     {QKeySequence::SaveAs,                  0,          Qt::CTRL | Qt::SHIFT | Qt::Key_S,       KB_Gnome | KB_Mac},
     {QKeySequence::Preferences,             0,          Qt::CTRL | Qt::Key_Comma,               KB_Mac},
     {QKeySequence::Quit,                    0,          Qt::CTRL | Qt::Key_Q,                   KB_Gnome | KB_KDE | KB_Mac},
@@ -499,6 +507,8 @@ QVariant QPlatformTheme::defaultThemeHint(ThemeHint hint)
         return QVariant(false);
     case MousePressAndHoldInterval:
         return QVariant(800);
+    case MouseDoubleClickDistance:
+        return QVariant(5);
     }
     return QVariant();
 }
@@ -632,7 +642,7 @@ QList<QKeySequence> QPlatformTheme::keyBindings(QKeySequence::StandardKey key) c
    Returns the text of a standard \a button.
 
   \since 5.3
-  \sa QMessageDialogOptions::StandardButton
+  \sa QPlatformDialogHelper::StandardButton
  */
 
 QString QPlatformTheme::standardButtonText(int button) const
@@ -643,41 +653,41 @@ QString QPlatformTheme::standardButtonText(int button) const
 QString QPlatformTheme::defaultStandardButtonText(int button)
 {
     switch (button) {
-    case QMessageDialogOptions::Ok:
+    case QPlatformDialogHelper::Ok:
         return QCoreApplication::translate("QPlatformTheme", "OK");
-    case QMessageDialogOptions::Save:
+    case QPlatformDialogHelper::Save:
         return QCoreApplication::translate("QPlatformTheme", "Save");
-    case QMessageDialogOptions::SaveAll:
+    case QPlatformDialogHelper::SaveAll:
         return QCoreApplication::translate("QPlatformTheme", "Save All");
-    case QMessageDialogOptions::Open:
+    case QPlatformDialogHelper::Open:
         return QCoreApplication::translate("QPlatformTheme", "Open");
-    case QMessageDialogOptions::Yes:
+    case QPlatformDialogHelper::Yes:
         return QCoreApplication::translate("QPlatformTheme", "&Yes");
-    case QMessageDialogOptions::YesToAll:
+    case QPlatformDialogHelper::YesToAll:
         return QCoreApplication::translate("QPlatformTheme", "Yes to &All");
-    case QMessageDialogOptions::No:
+    case QPlatformDialogHelper::No:
         return QCoreApplication::translate("QPlatformTheme", "&No");
-    case QMessageDialogOptions::NoToAll:
+    case QPlatformDialogHelper::NoToAll:
         return QCoreApplication::translate("QPlatformTheme", "N&o to All");
-    case QMessageDialogOptions::Abort:
+    case QPlatformDialogHelper::Abort:
         return QCoreApplication::translate("QPlatformTheme", "Abort");
-    case QMessageDialogOptions::Retry:
+    case QPlatformDialogHelper::Retry:
         return QCoreApplication::translate("QPlatformTheme", "Retry");
-    case QMessageDialogOptions::Ignore:
+    case QPlatformDialogHelper::Ignore:
         return QCoreApplication::translate("QPlatformTheme", "Ignore");
-    case QMessageDialogOptions::Close:
+    case QPlatformDialogHelper::Close:
         return QCoreApplication::translate("QPlatformTheme", "Close");
-    case QMessageDialogOptions::Cancel:
+    case QPlatformDialogHelper::Cancel:
         return QCoreApplication::translate("QPlatformTheme", "Cancel");
-    case QMessageDialogOptions::Discard:
+    case QPlatformDialogHelper::Discard:
         return QCoreApplication::translate("QPlatformTheme", "Discard");
-    case QMessageDialogOptions::Help:
+    case QPlatformDialogHelper::Help:
         return QCoreApplication::translate("QPlatformTheme", "Help");
-    case QMessageDialogOptions::Apply:
+    case QPlatformDialogHelper::Apply:
         return QCoreApplication::translate("QPlatformTheme", "Apply");
-    case QMessageDialogOptions::Reset:
+    case QPlatformDialogHelper::Reset:
         return QCoreApplication::translate("QPlatformTheme", "Reset");
-    case QMessageDialogOptions::RestoreDefaults:
+    case QPlatformDialogHelper::RestoreDefaults:
         return QCoreApplication::translate("QPlatformTheme", "Restore Defaults");
     default:
         break;

@@ -82,6 +82,7 @@ public:
 
     void scheduleUpdate();
     void topWindowChanged(QWindow *w);
+    int rasterSurfaces();
 
 public slots:
     void setDirty(const QRect &rect);
@@ -91,7 +92,7 @@ public slots:
 protected:
     typedef QList<QAndroidPlatformWindow *> WindowStackType;
     WindowStackType m_windowStack;
-    QRegion m_repaintRegion;
+    QRect m_dirtyRect;
     QTimer m_redrawTimer;
 
     QRect m_geometry;
@@ -110,6 +111,7 @@ private slots:
 
 private:
     int m_id = -1;
+    QAtomicInt m_rasterSurfaces = 0;
     ANativeWindow* m_nativeSurface = nullptr;
     QWaitCondition m_surfaceWaitCondition;
 };

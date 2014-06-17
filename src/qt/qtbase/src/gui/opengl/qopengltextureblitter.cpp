@@ -45,6 +45,7 @@
 #include <QtGui/QOpenGLShaderProgram>
 #include <QtGui/QOpenGLVertexArrayObject>
 #include <QtGui/QOpenGLContext>
+#include <QtGui/QOpenGLFunctions>
 
 QT_BEGIN_NAMESPACE
 
@@ -67,11 +68,8 @@ static const char fragment_shader150[] =
     "uniform sampler2D textureSampler;"
     "uniform bool swizzle;"
     "void main() {"
-    "   if (swizzle) {"
-    "       fragcolor = texture(textureSampler, uv).bgra;"
-    "   } else {"
-    "       fragcolor = texture(textureSampler,uv);"
-    "   }"
+    "   vec4 tmpFragColor = texture(textureSampler, uv);"
+    "   fragcolor = swizzle ? tmpFragColor.bgra : tmpFragColor;"
     "}";
 
 static const char vertex_shader[] =
@@ -90,11 +88,8 @@ static const char fragment_shader[] =
     "uniform sampler2D textureSampler;"
     "uniform bool swizzle;"
     "void main() {"
-    "   if (swizzle) {"
-    "       gl_FragColor = texture2D(textureSampler, uv).bgra;"
-    "   } else {"
-    "       gl_FragColor = texture2D(textureSampler,uv);"
-    "   }"
+    "   highp vec4 tmpFragColor = texture2D(textureSampler,uv);"
+    "   gl_FragColor = swizzle ? tmpFragColor.bgra : tmpFragColor;"
     "}";
 
 static const GLfloat vertex_buffer_data[] = {
@@ -120,11 +115,11 @@ class TextureBinder
 public:
     TextureBinder(GLuint textureId)
     {
-        glBindTexture(GL_TEXTURE_2D, textureId);
+        QOpenGLContext::currentContext()->functions()->glBindTexture(GL_TEXTURE_2D, textureId);
     }
     ~TextureBinder()
     {
-        glBindTexture(GL_TEXTURE_2D, 0);
+        QOpenGLContext::currentContext()->functions()->glBindTexture(GL_TEXTURE_2D, 0);
     }
 };
 
@@ -196,7 +191,7 @@ void QOpenGLTextureBlitterPrivate::blit(GLuint texture,
     program->setUniformValue(textureTransformUniformPos, textureTransform);
     textureMatrixUniformState = User;
 
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    QOpenGLContext::currentContext()->functions()->glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 void QOpenGLTextureBlitterPrivate::blit(GLuint texture,
@@ -210,6 +205,7 @@ void QOpenGLTextureBlitterPrivate::blit(GLuint texture,
         if (textureMatrixUniformState != IdentityFlipped) {
             QMatrix3x3 flipped;
             flipped(1,1) = -1;
+            flipped(1,2) = 1;
             program->setUniformValue(textureTransformUniformPos, flipped);
             textureMatrixUniformState = IdentityFlipped;
         }
@@ -218,7 +214,7 @@ void QOpenGLTextureBlitterPrivate::blit(GLuint texture,
         textureMatrixUniformState = Identity;
     }
 
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    QOpenGLContext::currentContext()->functions()->glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 QOpenGLTextureBlitter::QOpenGLTextureBlitter()
@@ -286,6 +282,12 @@ bool QOpenGLTextureBlitter::create()
     return true;
 }
 
+bool QOpenGLTextureBlitter::isCreated() const
+{
+    Q_D(const QOpenGLTextureBlitter);
+    return d->program;
+}
+
 void QOpenGLTextureBlitter::destroy()
 {
     Q_D(QOpenGLTextureBlitter);
@@ -344,25 +346,23 @@ void QOpenGLTextureBlitter::blit(GLuint texture,
 }
 
 QMatrix4x4 QOpenGLTextureBlitter::targetTransform(const QRectF &target,
-                                                  const QRect &viewport,
-                                                  Origin origin)
+                                                  const QRect &viewport)
 {
-    qreal x_scale = target.size().width() / viewport.width();
-    qreal y_scale = target.size().height() / viewport.height();
+    qreal x_scale = target.width() / viewport.width();
+    qreal y_scale = target.height() / viewport.height();
 
     const QPointF relative_to_viewport = target.topLeft() - viewport.topLeft();
-    qreal x_translate = ((relative_to_viewport.x() / viewport.width()) + (x_scale / 2)) * 2 - 1;
-    qreal y_translate = ((relative_to_viewport.y() / viewport.height()) + (y_scale / 2)) * 2 - 1;
+    qreal x_translate = x_scale - 1 + ((relative_to_viewport.x() / viewport.width()) * 2);
+    qreal y_translate = -y_scale + 1 - ((relative_to_viewport.y() / viewport.height()) * 2);
 
-    if (origin == OriginTopLeft) {
-        y_translate = -y_translate;
-    }
+    QMatrix4x4 matrix;
+    matrix(0,3) = x_translate;
+    matrix(1,3) = y_translate;
 
-    QMatrix4x4 vertexMatrix;
+    matrix(0,0) = x_scale;
+    matrix(1,1) = y_scale;
 
-    vertexMatrix.translate(x_translate, y_translate);
-    vertexMatrix.scale(x_scale, y_scale);
-    return vertexMatrix;
+    return matrix;
 }
 
 QMatrix3x3 QOpenGLTextureBlitter::sourceTransform(const QRectF &subTexture,
@@ -377,8 +377,8 @@ QMatrix3x3 QOpenGLTextureBlitter::sourceTransform(const QRectF &subTexture,
     qreal y_translate = topLeft.y() / textureSize.height();
 
     if (origin == OriginTopLeft) {
-        y_translate += (y_translate * 2) + y_scale;
-        y_scale = y_scale - 1;
+        y_scale = -y_scale;
+        y_translate = 1 - y_translate;
     }
 
     QMatrix3x3 matrix;

@@ -2,6 +2,7 @@ TARGET = qios
 
 PLUGIN_TYPE = platforms
 PLUGIN_CLASS_NAME = QIOSIntegrationPlugin
+!equals(TARGET, $$QT_DEFAULT_QPA_PLUGIN): PLUGIN_EXTENDS = -
 load(qt_plugin)
 
 QT += core-private gui-private platformsupport-private
@@ -21,7 +22,8 @@ OBJECTIVE_SOURCES = \
     qiosinputcontext.mm \
     qiostheme.mm \
     qiosglobal.mm \
-    qiosservices.mm
+    qiosservices.mm \
+    qiosclipboard.mm
 
 HEADERS = \
     qiosintegration.h \
@@ -37,7 +39,8 @@ HEADERS = \
     qiostheme.h \
     qiosglobal.h \
     qiosservices.h \
-    quiview.h
+    quiview.h \
+    qiosclipboard.h
 
 OTHER_FILES = \
     quiview_textinput.mm

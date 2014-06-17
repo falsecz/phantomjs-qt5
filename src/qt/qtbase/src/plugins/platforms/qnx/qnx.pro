@@ -65,7 +65,8 @@ HEADERS =   main.h \
             qqnxcursor.h \
             qqnxrasterwindow.h \
             qqnxscreeneventfilter.h \
-            qqnxglobal.h
+            qqnxglobal.h \
+            qqnxlgmon.h
 
 CONFIG(qqnx_screeneventthread) {
     DEFINES += QQNX_SCREENEVENTTHREAD
@@ -90,14 +91,14 @@ CONFIG(blackberry) {
                qqnxeventdispatcher_blackberry.cpp \
                qqnxbpseventfilter.cpp \
                qqnxvirtualkeyboardbps.cpp \
-               qqnxtheme.cpp \
+               qblackberrytheme.cpp \
                qqnxsystemsettings.cpp
 
     HEADERS += qqnxnavigatorbps.h \
                qqnxeventdispatcher_blackberry.h \
                qqnxbpseventfilter.h \
                qqnxvirtualkeyboardbps.h  \
-               qqnxtheme.h \
+               qblackberrytheme.h \
                qqnxsystemsettings.h \
                qqnxfiledialoghelper.h
 
@@ -145,6 +146,12 @@ CONFIG(qqnx_pps) {
     }
 }
 
+lgmon {
+    DEFINES += QQNX_LGMON
+    SOURCES += qqnxlgmon.cpp
+    LIBS += -llgmon
+}
+
 OTHER_FILES += qnx.json
 
 QMAKE_CXXFLAGS += -I./private
@@ -154,4 +161,5 @@ include (../../../platformsupport/fontdatabases/fontdatabases.pri)
 
 PLUGIN_TYPE = platforms
 PLUGIN_CLASS_NAME = QQnxIntegrationPlugin
+!equals(TARGET, $$QT_DEFAULT_QPA_PLUGIN): PLUGIN_EXTENDS = -
 load(qt_plugin)

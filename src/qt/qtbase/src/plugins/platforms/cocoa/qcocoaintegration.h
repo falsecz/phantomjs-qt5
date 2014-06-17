@@ -80,6 +80,7 @@ public:
     qreal refreshRate() const { return m_refreshRate; }
     QString name() const { return m_name; }
     QPlatformCursor *cursor() const  { return m_cursor; }
+    QWindow *topLevelAt(const QPoint &point) const;
     QList<QPlatformScreen *> virtualSiblings() const { return m_siblings; }
 
     // ----------------------------------------------------
@@ -131,6 +132,7 @@ public:
     QCocoaServices *services() const;
     QVariant styleHint(StyleHint hint) const;
 
+    Qt::KeyboardModifiers queryKeyboardModifiers() const;
     QList<int> possibleKeys(const QKeyEvent *event) const;
 
     void updateScreens();
@@ -139,6 +141,8 @@ public:
     void setToolbar(QWindow *window, NSToolbar *toolbar);
     NSToolbar *toolbar(QWindow *window) const;
     void clearToolbars();
+    void setWindow(NSWindow* nsWindow, QCocoaWindow *window);
+    QCocoaWindow *window(NSWindow *window);
 private:
     static QCocoaIntegration *mInstance;
 
@@ -157,6 +161,7 @@ private:
     QScopedPointer<QCocoaKeyMapper> mKeyboardMapper;
 
     QHash<QWindow *, NSToolbar *> mToolbars;
+    QHash<NSWindow *, QCocoaWindow*> mWindows;
 };
 
 QT_END_NAMESPACE

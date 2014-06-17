@@ -60,6 +60,7 @@
 #include "QtCore/qset.h"
 #include "QtGui/qregion.h"
 #include "QtGui/qinputmethod.h"
+#include "QtGui/qopengl.h"
 #include "QtWidgets/qsizepolicy.h"
 #include "QtWidgets/qstyle.h"
 #include "QtWidgets/qapplication.h"
@@ -80,6 +81,7 @@ class QPixmap;
 class QWidgetBackingStore;
 class QGraphicsProxyWidget;
 class QWidgetItemV2;
+class QOpenGLContext;
 
 class QStyle;
 
@@ -216,6 +218,7 @@ struct QTLWExtra {
     bool wasMaximized;
 #endif
     QWidgetWindow *window;
+    QOpenGLContext *shareContext;
     quint32 screenIndex; // index in qplatformscreenlist
 };
 
@@ -324,6 +327,8 @@ public:
     explicit QWidgetPrivate(int version = QObjectPrivateVersion);
     ~QWidgetPrivate();
 
+    static QWidgetPrivate *get(QWidget *w) { return w->d_func(); }
+
     QWExtra *extraData() const;
     QTLWExtra *topData() const;
     QTLWExtra *maybeTopData() const;
@@ -384,7 +389,7 @@ public:
     void render_helper(QPainter *painter, const QPoint &targetOffset, const QRegion &sourceRegion,
                        QWidget::RenderFlags renderFlags);
     void render(QPaintDevice *target, const QPoint &targetOffset, const QRegion &sourceRegion,
-                QWidget::RenderFlags renderFlags, bool readyToRender);
+                QWidget::RenderFlags renderFlags);
     void drawWidget(QPaintDevice *pdev, const QRegion &rgn, const QPoint &offset, int flags,
                     QPainter *sharedPainter = 0, QWidgetBackingStore *backingStore = 0);
 
@@ -618,6 +623,27 @@ public:
     inline QRect mapFromWS(const QRect &r) const
     { QRect rr(r); rr.translate(data.wrect.topLeft()); return rr; }
 
+    QOpenGLContext *shareContext() const;
+
+#ifndef QT_NO_OPENGL
+    virtual GLuint textureId() const { return 0; }
+
+    void setRenderToTexture() { renderToTexture = true; setTextureChildSeen(); }
+    void setTextureChildSeen()
+    {
+        Q_Q(QWidget);
+        if (textureChildSeen)
+            return;
+        textureChildSeen = 1;
+
+        if (!q->isWindow()) {
+            QWidget *parent = q->parentWidget();
+            if (parent)
+                get(parent)->setTextureChildSeen();
+        }
+    }
+#endif
+
     // Variables.
     // Regular pointers (keep them together to avoid gaps on 64 bit architectures).
     QWExtra *extra;
@@ -698,6 +724,8 @@ public:
     uint isMoved : 1;
     uint usesDoubleBufferedGLContext : 1;
     uint mustHaveWindowHandle : 1;
+    uint renderToTexture : 1;
+    uint textureChildSeen : 1;
 #ifndef QT_NO_IM
     uint inheritsInputMethodHints : 1;
 #endif

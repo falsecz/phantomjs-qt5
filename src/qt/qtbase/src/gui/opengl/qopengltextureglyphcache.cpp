@@ -51,13 +51,14 @@ QT_BEGIN_NAMESPACE
 
 QBasicAtomicInt qopengltextureglyphcache_serial_number = Q_BASIC_ATOMIC_INITIALIZER(1);
 
-QOpenGLTextureGlyphCache::QOpenGLTextureGlyphCache(QFontEngineGlyphCache::Type type, const QTransform &matrix)
-    : QImageTextureGlyphCache(type, matrix)
+QOpenGLTextureGlyphCache::QOpenGLTextureGlyphCache(QFontEngine::GlyphFormat format, const QTransform &matrix)
+    : QImageTextureGlyphCache(format, matrix)
     , m_textureResource(0)
     , pex(0)
     , m_blitProgram(0)
     , m_filterMode(Nearest)
     , m_serialNumber(qopengltextureglyphcache_serial_number.fetchAndAddRelaxed(1))
+    , m_buffer(QOpenGLBuffer::VertexBuffer)
 {
 #ifdef QT_GL_TEXTURE_GLYPH_CACHE_DEBUG
     qDebug(" -> QOpenGLTextureGlyphCache() %p for context %p.", this, QOpenGLContext::currentContext());
@@ -88,6 +89,11 @@ QOpenGLTextureGlyphCache::~QOpenGLTextureGlyphCache()
 #endif
 }
 
+static inline bool isCoreProfile()
+{
+    return QOpenGLContext::currentContext()->format().profile() == QSurfaceFormat::CoreProfile;
+}
+
 void QOpenGLTextureGlyphCache::createTextureData(int width, int height)
 {
     QOpenGLContext *ctx = const_cast<QOpenGLContext *>(QOpenGLContext::currentContext());
@@ -116,29 +122,62 @@ void QOpenGLTextureGlyphCache::createTextureData(int width, int height)
     if (!m_textureResource)
         m_textureResource = new QOpenGLGlyphTexture(ctx);
 
-    glGenTextures(1, &m_textureResource->m_texture);
-    glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
+    QOpenGLFunctions *funcs = ctx->functions();
+    funcs->glGenTextures(1, &m_textureResource->m_texture);
+    funcs->glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
 
     m_textureResource->m_width = width;
     m_textureResource->m_height = height;
 
-    if (m_type == QFontEngineGlyphCache::Raster_RGBMask || m_type == QFontEngineGlyphCache::Raster_ARGB) {
+    if (m_format == QFontEngine::Format_A32 || m_format == QFontEngine::Format_ARGB) {
         QVarLengthArray<uchar> data(width * height * 4);
         for (int i = 0; i < data.size(); ++i)
             data[i] = 0;
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, &data[0]);
+        funcs->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, &data[0]);
     } else {
         QVarLengthArray<uchar> data(width * height);
         for (int i = 0; i < data.size(); ++i)
             data[i] = 0;
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, width, height, 0, GL_ALPHA, GL_UNSIGNED_BYTE, &data[0]);
+#if !defined(QT_OPENGL_ES_2)
+        const GLint internalFormat = isCoreProfile() ? GL_R8 : GL_ALPHA;
+        const GLenum format = isCoreProfile() ? GL_RED : GL_ALPHA;
+#else
+        const GLint internalFormat = GL_ALPHA;
+        const GLenum format = GL_ALPHA;
+#endif
+        funcs->glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, GL_UNSIGNED_BYTE, &data[0]);
     }
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     m_filterMode = Nearest;
+
+    if (!m_buffer.isCreated()) {
+        m_buffer.create();
+        m_buffer.bind();
+        static GLfloat buf[sizeof(m_vertexCoordinateArray) + sizeof(m_textureCoordinateArray)];
+        memcpy(buf, m_vertexCoordinateArray, sizeof(m_vertexCoordinateArray));
+        memcpy(buf + (sizeof(m_vertexCoordinateArray) / sizeof(GLfloat)),
+               m_textureCoordinateArray,
+               sizeof(m_textureCoordinateArray));
+        m_buffer.allocate(buf, sizeof(buf));
+        m_buffer.release();
+    }
+
+    if (!m_vao.isCreated())
+        m_vao.create();
+}
+
+void QOpenGLTextureGlyphCache::setupVertexAttribs()
+{
+    m_buffer.bind();
+    m_blitProgram->setAttributeBuffer(int(QT_VERTEX_COORDS_ATTR), GL_FLOAT, 0, 2);
+    m_blitProgram->setAttributeBuffer(int(QT_TEXTURE_COORDS_ATTR), GL_FLOAT, sizeof(m_vertexCoordinateArray), 2);
+    m_blitProgram->enableAttributeArray(int(QT_VERTEX_COORDS_ATTR));
+    m_blitProgram->enableAttributeArray(int(QT_TEXTURE_COORDS_ATTR));
+    m_buffer.release();
 }
 
 void QOpenGLTextureGlyphCache::resizeTextureData(int width, int height)
@@ -149,8 +188,9 @@ void QOpenGLTextureGlyphCache::resizeTextureData(int width, int height)
         return;
     }
 
+    QOpenGLFunctions *funcs = ctx->functions();
     GLint oldFbo;
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFbo);
+    funcs->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFbo);
 
     int oldWidth = m_textureResource->m_width;
     int oldHeight = m_textureResource->m_height;
@@ -167,54 +207,53 @@ void QOpenGLTextureGlyphCache::resizeTextureData(int width, int height)
     if (ctx->d_func()->workaround_brokenFBOReadBack) {
         QImageTextureGlyphCache::resizeTextureData(width, height);
         Q_ASSERT(image().depth() == 8);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, oldHeight, GL_ALPHA, GL_UNSIGNED_BYTE, image().constBits());
-        glDeleteTextures(1, &oldTexture);
+        funcs->glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, oldHeight, GL_ALPHA, GL_UNSIGNED_BYTE, image().constBits());
+        funcs->glDeleteTextures(1, &oldTexture);
         return;
     }
 
     // ### the QTextureGlyphCache API needs to be reworked to allow
     // ### resizeTextureData to fail
 
-    QOpenGLFunctions funcs(ctx);
-
-    funcs.glBindFramebuffer(GL_FRAMEBUFFER, m_textureResource->m_fbo);
+    funcs->glBindFramebuffer(GL_FRAMEBUFFER, m_textureResource->m_fbo);
 
     GLuint tmp_texture;
-    glGenTextures(1, &tmp_texture);
-    glBindTexture(GL_TEXTURE_2D, tmp_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, oldWidth, oldHeight, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    funcs->glGenTextures(1, &tmp_texture);
+    funcs->glBindTexture(GL_TEXTURE_2D, tmp_texture);
+    funcs->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, oldWidth, oldHeight, 0,
+                        GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    funcs->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     m_filterMode = Nearest;
-    glBindTexture(GL_TEXTURE_2D, 0);
-    funcs.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D, tmp_texture, 0);
+    funcs->glBindTexture(GL_TEXTURE_2D, 0);
+    funcs->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                  GL_TEXTURE_2D, tmp_texture, 0);
 
-    funcs.glActiveTexture(GL_TEXTURE0 + QT_IMAGE_TEXTURE_UNIT);
-    glBindTexture(GL_TEXTURE_2D, oldTexture);
+    funcs->glActiveTexture(GL_TEXTURE0 + QT_IMAGE_TEXTURE_UNIT);
+    funcs->glBindTexture(GL_TEXTURE_2D, oldTexture);
 
     if (pex != 0)
         pex->transferMode(BrushDrawingMode);
 
-    glDisable(GL_STENCIL_TEST);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_BLEND);
+    funcs->glDisable(GL_STENCIL_TEST);
+    funcs->glDisable(GL_DEPTH_TEST);
+    funcs->glDisable(GL_SCISSOR_TEST);
+    funcs->glDisable(GL_BLEND);
 
-    glViewport(0, 0, oldWidth, oldHeight);
+    funcs->glViewport(0, 0, oldWidth, oldHeight);
 
     QOpenGLShaderProgram *blitProgram = 0;
     if (pex == 0) {
         if (m_blitProgram == 0) {
             m_blitProgram = new QOpenGLShaderProgram(ctx);
+            const bool isCoreProfile = ctx->format().profile() == QSurfaceFormat::CoreProfile;
 
             {
                 QString source;
-                source.append(QLatin1String(qopenglslMainWithTexCoordsVertexShader));
-                source.append(QLatin1String(qopenglslUntransformedPositionVertexShader));
+                source.append(QLatin1String(isCoreProfile ? qopenglslMainWithTexCoordsVertexShader_core : qopenglslMainWithTexCoordsVertexShader));
+                source.append(QLatin1String(isCoreProfile ? qopenglslUntransformedPositionVertexShader_core : qopenglslUntransformedPositionVertexShader));
 
                 QOpenGLShader *vertexShader = new QOpenGLShader(QOpenGLShader::Vertex, m_blitProgram);
                 vertexShader->compileSourceCode(source);
@@ -224,8 +263,8 @@ void QOpenGLTextureGlyphCache::resizeTextureData(int width, int height)
 
             {
                 QString source;
-                source.append(QLatin1String(qopenglslMainFragmentShader));
-                source.append(QLatin1String(qopenglslImageSrcFragmentShader));
+                source.append(QLatin1String(isCoreProfile ? qopenglslMainFragmentShader_core : qopenglslMainFragmentShader));
+                source.append(QLatin1String(isCoreProfile ? qopenglslImageSrcFragmentShader_core : qopenglslImageSrcFragmentShader));
 
                 QOpenGLShader *fragmentShader = new QOpenGLShader(QOpenGLShader::Fragment, m_blitProgram);
                 fragmentShader->compileSourceCode(source);
@@ -237,16 +276,19 @@ void QOpenGLTextureGlyphCache::resizeTextureData(int width, int height)
             m_blitProgram->bindAttributeLocation("textureCoordArray", QT_TEXTURE_COORDS_ATTR);
 
             m_blitProgram->link();
+
+            if (m_vao.isCreated()) {
+                m_vao.bind();
+                setupVertexAttribs();
+            }
         }
 
-        funcs.glVertexAttribPointer(QT_VERTEX_COORDS_ATTR, 2, GL_FLOAT, GL_FALSE, 0, m_vertexCoordinateArray);
-        funcs.glVertexAttribPointer(QT_TEXTURE_COORDS_ATTR, 2, GL_FLOAT, GL_FALSE, 0, m_textureCoordinateArray);
+        if (m_vao.isCreated())
+            m_vao.bind();
+        else
+            setupVertexAttribs();
 
         m_blitProgram->bind();
-        m_blitProgram->enableAttributeArray(int(QT_VERTEX_COORDS_ATTR));
-        m_blitProgram->enableAttributeArray(int(QT_TEXTURE_COORDS_ATTR));
-        m_blitProgram->disableAttributeArray(int(QT_OPACITY_ATTR));
-
         blitProgram = m_blitProgram;
 
     } else {
@@ -259,25 +301,29 @@ void QOpenGLTextureGlyphCache::resizeTextureData(int width, int height)
 
     blitProgram->setUniformValue("imageTexture", QT_IMAGE_TEXTURE_UNIT);
 
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    funcs->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-    glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
+    funcs->glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
 
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, oldWidth, oldHeight);
+    funcs->glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, oldWidth, oldHeight);
 
-    funcs.glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                    GL_RENDERBUFFER, 0);
-    glDeleteTextures(1, &tmp_texture);
-    glDeleteTextures(1, &oldTexture);
+    funcs->glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                     GL_RENDERBUFFER, 0);
+    funcs->glDeleteTextures(1, &tmp_texture);
+    funcs->glDeleteTextures(1, &oldTexture);
 
-    funcs.glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)oldFbo);
+    funcs->glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)oldFbo);
 
     if (pex != 0) {
-        glViewport(0, 0, pex->width, pex->height);
+        funcs->glViewport(0, 0, pex->width, pex->height);
         pex->updateClipScissorTest();
     } else {
-        m_blitProgram->disableAttributeArray(int(QT_VERTEX_COORDS_ATTR));
-        m_blitProgram->disableAttributeArray(int(QT_TEXTURE_COORDS_ATTR));
+        if (m_vao.isCreated()) {
+            m_vao.release();
+        } else {
+            m_blitProgram->disableAttributeArray(int(QT_VERTEX_COORDS_ATTR));
+            m_blitProgram->disableAttributeArray(int(QT_TEXTURE_COORDS_ATTR));
+        }
     }
 }
 
@@ -289,31 +335,22 @@ void QOpenGLTextureGlyphCache::fillTexture(const Coord &c, glyph_t glyph, QFixed
         return;
     }
 
+    QOpenGLFunctions *funcs = ctx->functions();
     if (ctx->d_func()->workaround_brokenFBOReadBack) {
         QImageTextureGlyphCache::fillTexture(c, glyph, subPixelPosition);
 
-        glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
+        funcs->glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
         const QImage &texture = image();
         const uchar *bits = texture.constBits();
         bits += c.y * texture.bytesPerLine() + c.x;
         for (int i=0; i<c.h; ++i) {
-            glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y + i, c.w, 1, GL_ALPHA, GL_UNSIGNED_BYTE, bits);
+            funcs->glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y + i, c.w, 1, GL_ALPHA, GL_UNSIGNED_BYTE, bits);
             bits += texture.bytesPerLine();
         }
         return;
     }
 
-    QImage mask;
-
-    if (m_current_fontengine->hasInternalCaching()) {
-        QImage *alphaMap = m_current_fontengine->lockedAlphaMapForGlyph(glyph, subPixelPosition, QFontEngine::Format_None);
-        if (!alphaMap || alphaMap->isNull())
-            return;
-        mask = alphaMap->copy();
-        m_current_fontengine->unlockAlphaMapForGlyph();
-    } else {
-        mask = textureMapForGlyph(glyph, subPixelPosition);
-    }
+    QImage mask = textureMapForGlyph(glyph, subPixelPosition);
     const int maskWidth = mask.width();
     const int maskHeight = mask.height();
 
@@ -328,8 +365,11 @@ void QOpenGLTextureGlyphCache::fillTexture(const Coord &c, glyph_t glyph, QFixed
         if (mask.format() == QImage::Format_RGB32
             // We need to make the alpha component equal to the average of the RGB values.
             // This is needed when drawing sub-pixel antialiased text on translucent targets.
-#if defined(QT_OPENGL_ES_2) || Q_BYTE_ORDER == Q_BIG_ENDIAN
+#if Q_BYTE_ORDER == Q_BIG_ENDIAN
             || mask.format() == QImage::Format_ARGB32_Premultiplied
+#else
+            || (mask.format() == QImage::Format_ARGB32_Premultiplied
+                && ctx->isOpenGLES())
 #endif
             ) {
             for (int y = 0; y < maskHeight; ++y) {
@@ -345,22 +385,28 @@ void QOpenGLTextureGlyphCache::fillTexture(const Coord &c, glyph_t glyph, QFixed
                         avg = qAlpha(src[x]);
 
                     src[x] = qRgba(r, g, b, avg);
-#if defined(QT_OPENGL_ES_2) || Q_BYTE_ORDER == Q_BIG_ENDIAN
                     // swizzle the bits to accommodate for the GL_RGBA upload.
-                    src[x] = ARGB2RGBA(src[x]);
+#if Q_BYTE_ORDER != Q_BIG_ENDIAN
+                    if (ctx->isOpenGLES())
 #endif
+                        src[x] = ARGB2RGBA(src[x]);
                 }
             }
         }
     }
 
-    glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
+    funcs->glBindTexture(GL_TEXTURE_2D, m_textureResource->m_texture);
     if (mask.depth() == 32) {
-#if defined(QT_OPENGL_ES_2) || Q_BYTE_ORDER == Q_BIG_ENDIAN
-        glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y, maskWidth, maskHeight, GL_RGBA, GL_UNSIGNED_BYTE, mask.bits());
+#ifdef QT_OPENGL_ES_2
+        GLenum fmt = GL_RGBA;
 #else
-        glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y, maskWidth, maskHeight, GL_BGRA, GL_UNSIGNED_BYTE, mask.bits());
+        GLenum fmt = ctx->isOpenGLES() ? GL_RGBA : GL_BGRA;
+#endif // QT_OPENGL_ES_2
+
+#if Q_BYTE_ORDER == Q_BIG_ENDIAN
+        fmt = GL_RGBA;
 #endif
+        funcs->glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y, maskWidth, maskHeight, fmt, GL_UNSIGNED_BYTE, mask.bits());
     } else {
         // glTexSubImage2D() might cause some garbage to appear in the texture if the mask width is
         // not a multiple of four bytes. The bug appeared on a computer with 32-bit Windows Vista
@@ -383,10 +429,17 @@ void QOpenGLTextureGlyphCache::fillTexture(const Coord &c, glyph_t glyph, QFixed
 #if 0
         if (ctx->d_func()->workaround_brokenAlphaTexSubImage) {
             for (int i = 0; i < maskHeight; ++i)
-                glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y + i, maskWidth, 1, GL_ALPHA, GL_UNSIGNED_BYTE, mask.scanLine(i));
+                funcs->glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y + i, maskWidth, 1, GL_ALPHA, GL_UNSIGNED_BYTE, mask.scanLine(i));
         } else {
 #endif
-            glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y, maskWidth, maskHeight, GL_ALPHA, GL_UNSIGNED_BYTE, mask.bits());
+
+#if !defined(QT_OPENGL_ES_2)
+        const GLenum format = isCoreProfile() ? GL_RED : GL_ALPHA;
+#else
+        const GLenum format = GL_ALPHA;
+#endif
+        funcs->glTexSubImage2D(GL_TEXTURE_2D, 0, c.x, c.y, maskWidth, maskHeight, format, GL_UNSIGNED_BYTE, mask.bits());
+
 #if 0
         }
 #endif

@@ -255,6 +255,57 @@ QLibraryInfo::buildDate()
 }
 #endif //QT_NO_DATESTRING
 
+#if defined(Q_CC_CLANG) // must be before GNU, because clang claims to be GNU too
+#  ifdef __apple_build_version__ // Apple clang has other version numbers
+#    define COMPILER_STRING "Clang " __clang_version__ " (Apple)"
+#  else
+#    define COMPILER_STRING "Clang " __clang_version__
+#  endif
+#elif defined(Q_CC_GNU)
+#  define COMPILER_STRING "GCC " __VERSION__
+#elif defined(Q_CC_MSVC)
+#  if _MSC_VER < 1600
+#    define COMPILER_STRING "MSVC 2008"
+#  elif _MSC_VER < 1700
+#    define COMPILER_STRING "MSVC 2010"
+#  elif _MSC_VER < 1800
+#    define COMPILER_STRING "MSVC 2012"
+#  elif _MSC_VER < 1900
+#    define COMPILER_STRING "MSVC 2013"
+#  else
+#    define COMPILER_STRING "MSVC <unknown version>"
+#  endif
+#else
+#  define COMPILER_STRING "<unknown compiler>"
+#endif
+
+/*!
+  Returns a string describing how this version of Qt was built.
+
+  \internal
+
+  \since 5.3
+*/
+
+const char *QLibraryInfo::build() Q_DECL_NOTHROW
+{
+   static const char data[] = "Qt " QT_VERSION_STR " (" __DATE__ ", "
+        COMPILER_STRING ", "
+#if QT_POINTER_SIZE == 4
+        "32"
+#else
+        "64"
+#endif
+        " bit, "
+#ifdef QT_NO_DEBUG
+        "release"
+#else
+        "debug"
+#endif
+        " build)";
+    return data;
+}
+
 /*!
     \since 5.0
     Returns \c true if this build of Qt was built with debugging enabled, or
@@ -447,7 +498,9 @@ QLibraryInfo::rawLocation(LibraryLocation loc, PathGroup group)
                     if (urlRef) {
                         QCFString path = CFURLCopyFileSystemPath(urlRef, kCFURLPOSIXPathStyle);
 #ifdef Q_OS_MACX
-                        return QDir::cleanPath(QString(path) + QLatin1String("/Contents/") + ret);
+                        QString bundleContentsDir = QString(path) + QLatin1String("/Contents/");
+                        if (QDir(bundleContentsDir).exists())
+                            return QDir::cleanPath(bundleContentsDir + ret);
 #else
                         return QDir::cleanPath(QString(path) + QLatin1Char('/') + ret); // iOS
 #endif

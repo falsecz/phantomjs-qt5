@@ -52,6 +52,8 @@ QT_BEGIN_NAMESPACE
 
 enum { Endian = 0, Data = 1 };
 
+static const uchar utf8bom[] = { 0xef, 0xbb, 0xbf };
+
 #if defined(__SSE2__) && defined(QT_COMPILER_SUPPORTS_SSE2)
 static inline bool simdEncodeAscii(uchar *&dst, const ushort *&nextAscii, const ushort *&src, const ushort *end)
 {
@@ -85,7 +87,7 @@ static inline bool simdEncodeAscii(uchar *&dst, const ushort *&nextAscii, const 
             // we don't want to load 32 bytes again in this loop if we know there are non-ASCII
             // characters still coming
             n = _bit_scan_reverse(n);
-            nextAscii = src + n;
+            nextAscii = src + n + 1;
             return false;
         }
 
@@ -115,7 +117,7 @@ static inline bool simdDecodeAscii(ushort *&dst, const uchar *&nextAscii, const 
             // we don't want to load 16 bytes again in this loop if we know there are non-ASCII
             // characters still coming
             n = _bit_scan_reverse(n);
-            nextAscii = src + n;
+            nextAscii = src + n + 1;
             return false;
         }
 
@@ -187,9 +189,9 @@ QByteArray QUtf8::convertFromUnicode(const QChar *uc, int len, QTextCodec::Conve
     int invalid = 0;
     if (state && !(state->flags & QTextCodec::IgnoreHeader)) {
         // append UTF-8 BOM
-        *cursor++ = 0xef;
-        *cursor++ = 0xbb;
-        *cursor++ = 0xbf;
+        *cursor++ = utf8bom[0];
+        *cursor++ = utf8bom[1];
+        *cursor++ = utf8bom[2];
     }
 
     const ushort *nextAscii = src;
@@ -235,24 +237,49 @@ QByteArray QUtf8::convertFromUnicode(const QChar *uc, int len, QTextCodec::Conve
 
 QString QUtf8::convertToUnicode(const char *chars, int len)
 {
-    QString result(len + 1, Qt::Uninitialized); // worst case
+    // UTF-8 to UTF-16 always needs the exact same number of words or less:
+    //    UTF-8     UTF-16
+    //   1 byte     1 word
+    //   2 bytes    1 word
+    //   3 bytes    1 word
+    //   4 bytes    2 words (one surrogate pair)
+    // That is, we'll use the full buffer if the input is US-ASCII (1-byte UTF-8),
+    // half the buffer for U+0080-U+07FF text (e.g., Greek, Cyrillic, Arabic) or
+    // non-BMP text, and one third of the buffer for U+0800-U+FFFF text (e.g, CJK).
+    //
+    // The table holds for invalid sequences too: we'll insert one replacement char
+    // per invalid byte.
+    QString result(len, Qt::Uninitialized);
+
     ushort *dst = reinterpret_cast<ushort *>(const_cast<QChar *>(result.constData()));
     const uchar *src = reinterpret_cast<const uchar *>(chars);
     const uchar *end = src + len;
 
-    while (src < end) {
-        const uchar *nextAscii = end;
-        if (simdDecodeAscii(dst, nextAscii, src, end))
-            break;
+    // attempt to do a full decoding in SIMD
+    const uchar *nextAscii = end;
+    if (!simdDecodeAscii(dst, nextAscii, src, end)) {
+        // at least one non-ASCII entry
+        // check if we failed to decode the UTF-8 BOM; if so, skip it
+        if (Q_UNLIKELY(src == reinterpret_cast<const uchar *>(chars))
+                && end - src >= 3
+                && Q_UNLIKELY(src[0] == utf8bom[0] && src[1] == utf8bom[1] && src[2] == utf8bom[2])) {
+            src += 3;
+        }
 
-        do {
-            uchar b = *src++;
-            int res = QUtf8Functions::fromUtf8<QUtf8BaseTraits>(b, dst, src, end);
-            if (res < 0) {
-                // decoding error
-                *dst++ = QChar::ReplacementCharacter;
-            }
-        } while (src < nextAscii);
+        while (src < end) {
+            nextAscii = end;
+            if (simdDecodeAscii(dst, nextAscii, src, end))
+                break;
+
+            do {
+                uchar b = *src++;
+                int res = QUtf8Functions::fromUtf8<QUtf8BaseTraits>(b, dst, src, end);
+                if (res < 0) {
+                    // decoding error
+                    *dst++ = QChar::ReplacementCharacter;
+                }
+            } while (src < nextAscii);
+        }
     }
 
     result.truncate(dst - reinterpret_cast<const ushort *>(result.constData()));
@@ -268,7 +295,18 @@ QString QUtf8::convertToUnicode(const char *chars, int len, QTextCodec::Converte
     int res;
     uchar ch = 0;
 
-    QString result(need + len + 1, Qt::Uninitialized); // worst case
+    // See above for buffer requirements for stateless decoding. However, that
+    // fails if the state is not empty. The following situations can add to the
+    // requirements:
+    //  state contains      chars starts with           requirement
+    //   1 of 2 bytes       valid continuation          0
+    //   2 of 3 bytes       same                        0
+    //   3 bytes of 4       same                        +1 (need to insert surrogate pair)
+    //   1 of 2 bytes       invalid continuation        +1 (need to insert replacement and restart)
+    //   2 of 3 bytes       same                        +1 (same)
+    //   3 of 4 bytes       same                        +1 (same)
+    QString result(need + len + 1, Qt::Uninitialized);
+
     ushort *dst = reinterpret_cast<ushort *>(const_cast<QChar *>(result.constData()));
     const uchar *src = reinterpret_cast<const uchar *>(chars);
     const uchar *end = src + len;
@@ -291,15 +329,17 @@ QString QUtf8::convertToUnicode(const char *chars, int len, QTextCodec::Converte
             const uchar *begin = &remainingCharsData[1];
             res = QUtf8Functions::fromUtf8<QUtf8BaseTraits>(remainingCharsData[0], dst, begin,
                     static_cast<const uchar *>(remainingCharsData) + remainingCharsCount + newCharsToCopy);
-            if (res == QUtf8BaseTraits::EndOfString) {
+            if (res == QUtf8BaseTraits::Error || (res == QUtf8BaseTraits::EndOfString && len == 0)) {
+                // special case for len == 0:
+                // if we were supplied an empty string, terminate the previous, unfinished sequence with error
+                ++invalid;
+                *dst++ = replacement;
+            } else if (res == QUtf8BaseTraits::EndOfString) {
                 // if we got EndOfString again, then there were too few bytes in src;
                 // copy to our state and return
                 state->remainingChars = remainingCharsCount + newCharsToCopy;
                 memcpy(&state->state_data[0], remainingCharsData, state->remainingChars);
                 return QString();
-            } else if (res == QUtf8BaseTraits::Error) {
-                ++invalid;
-                *dst++ = replacement;
             } else if (!headerdone && res >= 0) {
                 // eat the UTF-8 BOM
                 headerdone = true;
@@ -308,8 +348,10 @@ QString QUtf8::convertToUnicode(const char *chars, int len, QTextCodec::Converte
             }
 
             // adjust src now that we have maybe consumed a few chars
-            //Q_ASSERT(res > remainingCharsCount)
-            src += res - remainingCharsCount;
+            if (res >= 0) {
+                Q_ASSERT(res > remainingCharsCount);
+                src += res - remainingCharsCount;
+            }
         }
     }
 

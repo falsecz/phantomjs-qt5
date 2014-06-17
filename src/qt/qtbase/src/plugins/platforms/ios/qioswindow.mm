@@ -192,12 +192,25 @@
 
 - (void)displayLayer:(CALayer *)layer
 {
-    QSize bounds = fromCGRect(layer.bounds).toRect().size();
+    Q_UNUSED(layer);
+    Q_ASSERT(layer == self.layer);
 
-    Q_ASSERT(m_qioswindow->geometry().size() == bounds);
-    Q_ASSERT(self.hidden == !m_qioswindow->window()->isVisible());
+    [self sendUpdatedExposeEvent];
+}
 
-    QRegion region = self.hidden ? QRegion() : QRect(QPoint(), bounds);
+- (void)sendUpdatedExposeEvent
+{
+    QRegion region;
+
+    if (m_qioswindow->isExposed()) {
+        QSize bounds = fromCGRect(self.layer.bounds).toRect().size();
+
+        Q_ASSERT(m_qioswindow->geometry().size() == bounds);
+        Q_ASSERT(self.hidden == !m_qioswindow->window()->isVisible());
+
+        region = QRect(QPoint(), bounds);
+    }
+
     QWindowSystemInterface::handleExposeEvent(m_qioswindow->window(), region);
     QWindowSystemInterface::flushWindowSystemEvents();
 }
@@ -247,6 +260,14 @@
         m_activeTouches[touch].id = m_nextTouchId++;
     }
 
+    if (m_activeTouches.size() == 1) {
+        QPlatformWindow *topLevel = m_qioswindow;
+        while (QPlatformWindow *p = topLevel->parent())
+            topLevel = p;
+        if (topLevel->window() != QGuiApplication::focusWindow())
+            topLevel->requestActivateWindow();
+    }
+
     [self updateTouchList:touches withState:Qt::TouchPointPressed];
     [self sendTouchEventWithTimestamp:ulong(event.timestamp * 1000)];
 }
@@ -259,14 +280,6 @@
 
 - (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
 {
-    QWindow *window = m_qioswindow->window();
-    if (window != QGuiApplication::focusWindow() && m_activeTouches.size() == 1) {
-        // Activate the touched window if the last touch was released inside it:
-        UITouch *touch = static_cast<UITouch *>([[touches allObjects] lastObject]);
-        if (CGRectContainsPoint([self bounds], [touch locationInView:self]))
-            m_qioswindow->requestActivateWindow();
-    }
-
     [self updateTouchList:touches withState:Qt::TouchPointReleased];
     [self sendTouchEventWithTimestamp:ulong(event.timestamp * 1000)];
 
@@ -334,6 +347,8 @@ QIOSWindow::QIOSWindow(QWindow *window)
     , m_view([[QUIView alloc] initWithQIOSWindow:this])
     , m_windowLevel(0)
 {
+    connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, &QIOSWindow::applicationStateChanged);
+
     setParent(QPlatformWindow::parent());
 
     // Resolve default window geometry in case it was not set before creating the
@@ -372,7 +387,7 @@ void QIOSWindow::setVisible(bool visible)
     m_view.hidden = !visible;
     [m_view setNeedsDisplay];
 
-    if (!isQtApplication())
+    if (!isQtApplication() || !window()->isTopLevel())
         return;
 
     // Since iOS doesn't do window management the way a Qt application
@@ -388,18 +403,16 @@ void QIOSWindow::setVisible(bool visible)
 
     if (visible) {
         requestActivateWindow();
-
-        if (window()->isTopLevel())
-            static_cast<QIOSScreen *>(screen())->updateStatusBarVisibility();
-
+        static_cast<QIOSScreen *>(screen())->updateStatusBarVisibility();
     } else {
         // Activate top-most visible QWindow:
         NSArray *subviews = m_view.viewController.view.subviews;
         for (int i = int(subviews.count) - 1; i >= 0; --i) {
             UIView *view = [subviews objectAtIndex:i];
             if (!view.hidden) {
-                if (QWindow *window = view.qwindow) {
-                    static_cast<QIOSWindow *>(window->handle())->requestActivateWindow();
+                QWindow *w = view.qwindow;
+                if (w && w->isTopLevel()) {
+                    static_cast<QIOSWindow *>(w->handle())->requestActivateWindow();
                     break;
                 }
             }
@@ -473,7 +486,8 @@ void QIOSWindow::applyGeometry(const QRect &rect)
 
 bool QIOSWindow::isExposed() const
 {
-    return window()->isVisible() && !window()->geometry().isEmpty();
+    return qApp->applicationState() > Qt::ApplicationHidden
+        && window()->isVisible() && !window()->geometry().isEmpty();
 }
 
 void QIOSWindow::setWindowState(Qt::WindowState state)
@@ -593,6 +607,12 @@ void QIOSWindow::handleContentOrientationChange(Qt::ScreenOrientation orientatio
     // that the task bar (and associated gestures) are aligned correctly:
     UIInterfaceOrientation uiOrientation = UIInterfaceOrientation(fromQtScreenOrientation(orientation));
     [[UIApplication sharedApplication] setStatusBarOrientation:uiOrientation animated:NO];
+}
+
+void QIOSWindow::applicationStateChanged(Qt::ApplicationState)
+{
+    if (window()->isExposed() != isExposed())
+        [m_view sendUpdatedExposeEvent];
 }
 
 qreal QIOSWindow::devicePixelRatio() const

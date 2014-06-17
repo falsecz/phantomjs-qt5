@@ -336,6 +336,15 @@ QApplicationPrivate::~QApplicationPrivate()
 */
 
 /*!
+    \fn QApplication::setGraphicsSystem(const QString &)
+    \obsolete
+
+    This call has no effect.
+
+    Use the QPA framework instead.
+*/
+
+/*!
     \fn QWidget *QApplication::topLevelAt(const QPoint &point)
 
     Returns the top-level widget at the given \a point; returns 0 if
@@ -377,7 +386,6 @@ QPalette *QApplicationPrivate::set_pal = 0;        // default palette set by pro
 QFont *QApplicationPrivate::sys_font = 0;        // default system font
 QFont *QApplicationPrivate::set_font = 0;        // default font set by programmer
 
-QIcon *QApplicationPrivate::app_icon = 0;
 QWidget *QApplicationPrivate::main_widget = 0;        // main application widget
 QWidget *QApplicationPrivate::focus_widget = 0;        // has keyboard input focus
 QWidget *QApplicationPrivate::hidden_focus_widget = 0; // will get keyboard input focus after show()
@@ -730,8 +738,6 @@ QApplication::~QApplication()
 
     delete QApplicationPrivate::app_style;
     QApplicationPrivate::app_style = 0;
-    delete QApplicationPrivate::app_icon;
-    QApplicationPrivate::app_icon = 0;
 
 #ifndef QT_NO_DRAGANDDROP
     if (qt_is_gui_used)
@@ -1561,6 +1567,7 @@ QString QApplicationPrivate::desktopStyleKey()
     return QString();
 }
 
+#if QT_VERSION < 0x060000 // remove these forwarders in Qt 6
 /*!
     \property QApplication::windowIcon
     \brief the default window icon
@@ -1569,23 +1576,32 @@ QString QApplicationPrivate::desktopStyleKey()
 */
 QIcon QApplication::windowIcon()
 {
-    return QApplicationPrivate::app_icon ? *QApplicationPrivate::app_icon : QIcon();
+    return QGuiApplication::windowIcon();
 }
 
 void QApplication::setWindowIcon(const QIcon &icon)
 {
-    if (!QApplicationPrivate::app_icon)
-        QApplicationPrivate::app_icon = new QIcon();
-    *QApplicationPrivate::app_icon = icon;
-    if (QApplicationPrivate::is_app_running && !QApplicationPrivate::is_app_closing) {
-        QEvent e(QEvent::ApplicationWindowIconChange);
-        QWidgetList all = QApplication::allWidgets();
-        for (QWidgetList::ConstIterator it = all.constBegin(); it != all.constEnd(); ++it) {
-            QWidget *w = *it;
-            if (w->isWindow())
-                sendEvent(w, &e);
-        }
+    QGuiApplication::setWindowIcon(icon);
+}
+#endif
+
+void QApplicationPrivate::notifyWindowIconChanged()
+{
+    QEvent ev(QEvent::ApplicationWindowIconChange);
+    const QWidgetList list = QApplication::topLevelWidgets();
+    QWindowList windowList = QGuiApplication::topLevelWindows();
+
+    // send to all top-level QWidgets
+    for (int i = 0; i < list.size(); ++i) {
+        QWidget *w = list.at(i);
+        windowList.removeOne(w->windowHandle());
+        QCoreApplication::sendEvent(w, &ev);
     }
+
+    // in case there are any plain QWindows in this QApplication-using
+    // application, also send the notification to them
+    for (int i = 0; i < windowList.size(); ++i)
+        QCoreApplication::sendEvent(windowList.at(i), &ev);
 }
 
 /*!
@@ -1726,6 +1742,42 @@ QFontMetrics QApplication::fontMetrics()
     return desktop()->fontMetrics();
 }
 
+bool QApplicationPrivate::tryCloseAllWidgetWindows(QWindowList *processedWindows)
+{
+    Q_ASSERT(processedWindows);
+    while (QWidget *w = QApplication::activeModalWidget()) {
+        if (!w->isVisible() || w->data->is_closing)
+            break;
+        QWindow *window = w->windowHandle();
+        if (!w->close()) // Qt::WA_DeleteOnClose may cause deletion.
+            return false;
+        if (window)
+            processedWindows->append(window);
+    }
+
+    QWidgetList list = QApplication::topLevelWidgets();
+    for (int i = 0; i < list.size(); ++i) {
+        QWidget *w = list.at(i);
+        if (w->isVisible() && w->windowType() != Qt::Desktop &&
+                !w->testAttribute(Qt::WA_DontShowOnScreen) && !w->data->is_closing) {
+            QWindow *window = w->windowHandle();
+            if (!w->close())  // Qt::WA_DeleteOnClose may cause deletion.
+                return false;
+            if (window)
+                processedWindows->append(window);
+            list = QApplication::topLevelWidgets();
+            i = -1;
+        }
+    }
+    return true;
+}
+
+bool QApplicationPrivate::tryCloseAllWindows()
+{
+    QWindowList processedWindows;
+    return QApplicationPrivate::tryCloseAllWidgetWindows(&processedWindows)
+        && QGuiApplicationPrivate::tryCloseRemainingWindows(processedWindows);
+}
 
 /*!
     Closes all top-level windows.
@@ -1747,24 +1799,8 @@ QFontMetrics QApplication::fontMetrics()
 */
 void QApplication::closeAllWindows()
 {
-    bool did_close = true;
-    QWidget *w;
-    while ((w = activeModalWidget()) && did_close) {
-        if (!w->isVisible() || w->data->is_closing)
-            break;
-        did_close = w->close();
-    }
-    QWidgetList list = QApplication::topLevelWidgets();
-    for (int i = 0; did_close && i < list.size(); ++i) {
-        w = list.at(i);
-        if (w->isVisible()
-            && w->windowType() != Qt::Desktop
-            && !w->data->is_closing) {
-            did_close = w->close();
-            list = QApplication::topLevelWidgets();
-            i = -1;
-        }
-    }
+    QWindowList processedWindows;
+    QApplicationPrivate::tryCloseAllWidgetWindows(&processedWindows);
 }
 
 /*!
@@ -2664,7 +2700,8 @@ void QApplication::setStartDragDistance(int l)
 
     Qt uses this value internally, e.g. in QFileDialog.
 
-    The default value is 4 pixels.
+    The default value (if the platform doesn't provide a different default)
+    is 10 pixels.
 
     \sa startDragTime(), QPoint::manhattanLength(), {Drag and Drop}
 */
@@ -2717,9 +2754,11 @@ bool QApplicationPrivate::shouldQuit()
     QWindowList processedWindows;
     for (int i = 0; i < list.size(); ++i) {
         QWidget *w = list.at(i);
-        processedWindows.push_back(w->windowHandle());
-        if (w->isVisible() && !w->parentWidget() && w->testAttribute(Qt::WA_QuitOnClose))
-            return false;
+        if (QWindow *window = w->windowHandle()) { // Menus, popup widgets may not have a QWindow
+            processedWindows.push_back(window);
+            if (w->isVisible() && !w->parentWidget() && w->testAttribute(Qt::WA_QuitOnClose))
+                return false;
+        }
     }
     return QGuiApplicationPrivate::shouldQuitInternal(processedWindows);
 }
@@ -2831,16 +2870,19 @@ bool QApplication::notify(QObject *receiver, QEvent *e)
         case QEvent::NetworkReplyUpdated:
             break;
         default:
-            if (receiver->isWidgetType()) {
-                if (d->gestureManager->filterEvent(static_cast<QWidget *>(receiver), e))
-                    return true;
-            } else {
-                // a special case for events that go to QGesture objects.
-                // We pass the object to the gesture manager and it'll figure
-                // out if it's QGesture or not.
-                if (d->gestureManager->filterEvent(receiver, e))
-                    return true;
+            if (d->gestureManager->thread() == QThread::currentThread()) {
+                if (receiver->isWidgetType()) {
+                    if (d->gestureManager->filterEvent(static_cast<QWidget *>(receiver), e))
+                        return true;
+                } else {
+                    // a special case for events that go to QGesture objects.
+                    // We pass the object to the gesture manager and it'll figure
+                    // out if it's QGesture or not.
+                    if (d->gestureManager->filterEvent(receiver, e))
+                        return true;
+                }
             }
+            break;
         }
     }
 #endif // QT_NO_GESTURES
@@ -3067,12 +3109,12 @@ bool QApplication::notify(QObject *receiver, QEvent *e)
             QPoint relpos = wheel->pos();
             bool eventAccepted = wheel->isAccepted();
 
-            if (e->spontaneous())
+            if (e->spontaneous() && wheel->phase() == Qt::ScrollUpdate)
                 QApplicationPrivate::giveFocusAccordingToFocusPolicy(w, e, relpos);
 
             while (w) {
                 QWheelEvent we(relpos, wheel->globalPos(), wheel->pixelDelta(), wheel->angleDelta(), wheel->delta(), wheel->orientation(), wheel->buttons(),
-                               wheel->modifiers());
+                               wheel->modifiers(), wheel->phase());
                 we.spont = wheel->spontaneous();
                 res = d->notify_helper(w, w == receiver ? wheel : &we);
                 eventAccepted = ((w == receiver) ? wheel : &we)->isAccepted();
@@ -3248,30 +3290,6 @@ bool QApplication::notify(QObject *receiver, QEvent *e)
         }
         break;
 #endif
-
-    case QEvent::TouchUpdate:
-    case QEvent::TouchEnd:
-    {
-        QWidget *widget = static_cast<QWidget *>(receiver);
-        QTouchEvent *touchEvent = static_cast<QTouchEvent *>(e);
-        const bool acceptTouchEvents = widget->testAttribute(Qt::WA_AcceptTouchEvents);
-
-        if (e->type() != QEvent::TouchUpdate && acceptTouchEvents && e->spontaneous()) {
-            const QPoint localPos = touchEvent->touchPoints()[0].pos().toPoint();
-            QApplicationPrivate::giveFocusAccordingToFocusPolicy(widget, e, localPos);
-        }
-
-        touchEvent->setTarget(widget);
-        touchEvent->setAccepted(acceptTouchEvents);
-
-        res = acceptTouchEvents && d->notify_helper(widget, touchEvent);
-
-        // If the touch event wasn't accepted, synthesize a mouse event and see if the widget wants it.
-        if (!touchEvent->isAccepted() && QGuiApplicationPrivate::synthesizeMouseFromTouchEventsEnabled())
-            res = d->translateTouchToMouse(widget, touchEvent);
-        break;
-    }
-
     case QEvent::TouchBegin:
     // Note: TouchUpdate and TouchEnd events are never propagated
     {
@@ -3292,15 +3310,6 @@ bool QApplication::notify(QObject *receiver, QEvent *e)
             touchEvent->setAccepted(acceptTouchEvents);
             QPointer<QWidget> p = widget;
             res = acceptTouchEvents && d->notify_helper(widget, touchEvent);
-
-            // If the touch event wasn't accepted, synthesize a mouse event and see if the widget wants it.
-            if (!touchEvent->isAccepted() && QGuiApplicationPrivate::synthesizeMouseFromTouchEventsEnabled()) {
-                res = d->translateTouchToMouse(widget, touchEvent);
-                eventAccepted = touchEvent->isAccepted();
-                if (eventAccepted)
-                    break;
-            }
-
             eventAccepted = touchEvent->isAccepted();
             if (p.isNull()) {
                 // widget was deleted
@@ -3863,67 +3872,6 @@ QWidget *QApplicationPrivate::findClosestTouchPointTarget(QTouchDevice *device, 
     return static_cast<QWidget *>(closestTarget);
 }
 
-class WidgetAttributeSaver
-{
-public:
-    explicit WidgetAttributeSaver(QWidget *widget, Qt::WidgetAttribute attribute, bool forcedValue)
-        : m_widget(widget),
-          m_attribute(attribute),
-          m_savedValue(widget->testAttribute(attribute))
-    {
-        widget->setAttribute(attribute, forcedValue);
-    }
-
-    ~WidgetAttributeSaver()
-    {
-        m_widget->setAttribute(m_attribute, m_savedValue);
-    }
-
-private:
-    QWidget * const m_widget;
-    const Qt::WidgetAttribute m_attribute;
-    const bool m_savedValue;
-};
-
-bool QApplicationPrivate::translateTouchToMouse(QWidget *widget, QTouchEvent *event)
-{
-    Q_FOREACH (const QTouchEvent::TouchPoint &p, event->touchPoints()) {
-        const QEvent::Type eventType = (p.state() & Qt::TouchPointPressed) ? QEvent::MouseButtonPress
-                                     : (p.state() & Qt::TouchPointReleased) ? QEvent::MouseButtonRelease
-                                     : (p.state() & Qt::TouchPointMoved) ? QEvent::MouseMove
-                                     : QEvent::None;
-
-        if (eventType == QEvent::None)
-            continue;
-
-        const QPoint pos = widget->mapFromGlobal(p.screenPos().toPoint());
-
-        QMouseEvent mouseEvent(eventType, pos, p.screenPos().toPoint(),
-                               Qt::LeftButton,
-                               (eventType == QEvent::MouseButtonRelease) ? Qt::NoButton : Qt::LeftButton,
-                               event->modifiers());
-        mouseEvent.setAccepted(true);
-        mouseEvent.setTimestamp(event->timestamp());
-
-        // Make sure our synthesized mouse event doesn't propagate
-        // we want to control the propagation ourself to get a chance to
-        // deliver a proper touch event higher up in the hierarchy if that
-        // widget doesn't pick up the mouse event either.
-        WidgetAttributeSaver saver(widget, Qt::WA_NoMousePropagation, true);
-
-        // Note it has to be a spontaneous event if we want the focus management
-        // and input method support to behave properly. Quite some of the code
-        // related to those aspect check for the spontaneous flag.
-        const bool res = QCoreApplication::sendSpontaneousEvent(widget, &mouseEvent);
-        event->setAccepted(mouseEvent.isAccepted());
-
-        if (mouseEvent.isAccepted())
-            return res;
-    }
-
-    return false;
-}
-
 bool QApplicationPrivate::translateRawTouchEvent(QWidget *window,
                                                  QTouchDevice *device,
                                                  const QList<QTouchEvent::TouchPoint> &touchPoints,
@@ -4034,7 +3982,11 @@ bool QApplicationPrivate::translateRawTouchEvent(QWidget *window,
             break;
         }
         default:
-            if (widget->testAttribute(Qt::WA_WState_AcceptedTouchBeginEvent)) {
+            if (widget->testAttribute(Qt::WA_WState_AcceptedTouchBeginEvent)
+#ifndef QT_NO_GESTURES
+                || QGestureManager::gesturePending(widget)
+#endif
+                ) {
                 if (touchEvent.type() == QEvent::TouchEnd)
                     widget->setAttribute(Qt::WA_WState_AcceptedTouchBeginEvent, false);
                 if (QApplication::sendSpontaneousEvent(widget, &touchEvent) && touchEvent.isAccepted())

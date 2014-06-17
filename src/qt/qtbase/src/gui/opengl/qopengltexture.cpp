@@ -347,7 +347,6 @@ void QOpenGLTexturePrivate::allocateMutableStorage()
         break;
 
     case QOpenGLTexture::Target2D:
-    case QOpenGLTexture::TargetCubeMap:
     case QOpenGLTexture::TargetRectangle:
         for (int level = 0; level < mipLevels; ++level)
             texFuncs->glTextureImage2D(textureId, target, bindingTarget, level, format,
@@ -356,6 +355,29 @@ void QOpenGLTexturePrivate::allocateMutableStorage()
                                        0,
                                        QOpenGLTexture::RGBA, QOpenGLTexture::UInt8, 0);
         break;
+
+    case QOpenGLTexture::TargetCubeMap: {
+        // Cubemaps are the odd one out. We have to allocate storage for each
+        // face and miplevel using the special cubemap face targets rather than
+        // GL_TARGET_CUBEMAP.
+        const QOpenGLTexture::CubeMapFace faceTargets[] = {
+            QOpenGLTexture::CubeMapPositiveX, QOpenGLTexture::CubeMapNegativeX,
+            QOpenGLTexture::CubeMapPositiveY, QOpenGLTexture::CubeMapNegativeY,
+            QOpenGLTexture::CubeMapPositiveZ, QOpenGLTexture::CubeMapNegativeZ
+        };
+
+        for (int faceTarget = 0; faceTarget < 6; ++faceTarget) {
+            for (int level = 0; level < mipLevels; ++level) {
+                texFuncs->glTextureImage2D(textureId, faceTargets[faceTarget], bindingTarget,
+                                           level, format,
+                                           mipLevelSize(level, dimensions[0]),
+                                           mipLevelSize(level, dimensions[1]),
+                                           0,
+                                           QOpenGLTexture::RGBA, QOpenGLTexture::UInt8, 0);
+            }
+        }
+        break;
+    }
 
     case QOpenGLTexture::Target2DArray:
         if (features.testFlag(QOpenGLTexture::TextureArrays)) {
@@ -1111,6 +1133,17 @@ QOpenGLTexture *QOpenGLTexturePrivate::createTextureView(QOpenGLTexture::Target 
 */
 
 /*!
+    \enum QOpenGLTexture::Filter
+    This enum defines the filtering parameters for a QOpenGLTexture object.
+    \value Nearest Equivalent to GL_NEAREST
+    \value Linear Equivalent to GL_LINEAR
+    \value NearestMipMapNearest Equivalent to GL_NEAREST_MIPMAP_NEAREST
+    \value NearestMipMapLinear Equivalent to GL_NEAREST_MIPMAP_LINEAR
+    \value LinearMipMapNearest Equivalent to GL_LINEAR_MIPMAP_NEAREST
+    \value LinearMipMapLinear Equivalent to GL_LINEAR_MIPMAP_LINEAR
+*/
+
+/*!
     \enum QOpenGLTexture::Target
     This enum defines the texture target of a QOpenGLTexture object.
 
@@ -1164,7 +1197,7 @@ QOpenGLTexture *QOpenGLTexturePrivate::createTextureView(QOpenGLTexture::Target 
 */
 
 /*!
-    \enum TextureUnitReset
+    \enum QOpenGLTexture::TextureUnitReset
     This enum defines options ot control texture unit activation.
 
     \value ResetTextureUnit The previous active texture unit will be reset
@@ -1320,7 +1353,7 @@ QOpenGLTexture *QOpenGLTexturePrivate::createTextureView(QOpenGLTexture::Target 
 */
 
 /*!
-    \enum PixelType
+    \enum QOpenGLTexture::PixelType
     This enum defines the possible pixel data types for a pixel transfer operation
 
     \value NoPixelType Equivalent to GL_NONE
@@ -1394,7 +1427,7 @@ QOpenGLTexture *QOpenGLTexturePrivate::createTextureView(QOpenGLTexture::Target 
 */
 
 /*!
-    \enum WrapMode
+    \enum QOpenGLTexture::WrapMode
     This enum defines the possible texture coordinate wrapping modes.
 
     \value Repeat Texture coordinate is repeated. Equivalent to GL_REPEAT
@@ -1405,7 +1438,7 @@ QOpenGLTexture *QOpenGLTexturePrivate::createTextureView(QOpenGLTexture::Target 
 */
 
 /*!
-    \enum CoordinateDirection
+    \enum QOpenGLTexture::CoordinateDirection
     This enum defines the possible texture coordinate directions
 
     \value DirectionS The horizontal direction. Equivalent to GL_TEXTURE_WRAP_S
@@ -1428,7 +1461,7 @@ QOpenGLTexture::QOpenGLTexture(Target target)
 /*!
     Creates a QOpenGLTexture object that can later be bound to the 2D texture
     target and contains the pixel data contained in \a image. If you wish
-    to have a chain of mipmaps generated then set \a useMipMaps to true (this
+    to have a chain of mipmaps generated then set \a genMipMaps to \c true (this
     is the default).
 
     This does create the underlying OpenGL texture object. Therefore,
@@ -1457,6 +1490,8 @@ QOpenGLTexture::~QOpenGLTexture()
     Normally it should not be necessary to call this function directly as all
     functions that set properties of the texture object implicitly call create()
     on your behalf.
+
+    Returns \c true if the creation succeeded, otherwise returns \c false.
 
     \sa destroy(), isCreated(), textureId()
 */
@@ -1524,9 +1559,8 @@ void QOpenGLTexture::bind()
     EXT_direct_state_access extension where available and simulates it
     where it is not.
 
-    If \a restoreTextureUnit is true then this function
-    will restore the active unit to the texture unit that was active
-    upon entry.
+    If parameter \a reset is \c true then this function will restore
+    the active unit to the texture unit that was active upon entry.
 
     \sa release()
 */
@@ -1551,7 +1585,7 @@ void QOpenGLTexture::release()
 /*!
     Unbinds this texture from texture unit \a unit.
 
-    If \a restoreTextureUnit is true then this function
+    If parameter \a reset is \c true then this function
     will restore the active unit to the texture unit that was active
     upon entry.
 */
@@ -1600,7 +1634,7 @@ GLuint QOpenGLTexture::boundTextureId(BindingTarget target)
     }
 
     GLint textureId = 0;
-    glGetIntegerv(target, &textureId);
+    ctx->functions()->glGetIntegerv(target, &textureId);
     return static_cast<GLuint>(textureId);
 }
 
@@ -1620,11 +1654,11 @@ GLuint QOpenGLTexture::boundTextureId(uint unit, BindingTarget target)
     funcs->initializeOpenGLFunctions();
 
     GLint oldTextureUnit = 0;
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &oldTextureUnit);
+    funcs->glGetIntegerv(GL_ACTIVE_TEXTURE, &oldTextureUnit);
 
     funcs->glActiveTexture(unit);
     GLint textureId = 0;
-    glGetIntegerv(target, &textureId);
+    funcs->glGetIntegerv(target, &textureId);
     funcs->glActiveTexture(oldTextureUnit);
 
     return static_cast<GLuint>(textureId);
@@ -1805,11 +1839,11 @@ QOpenGLTexture::TextureFormat QOpenGLTexture::format() const
 }
 
 /*!
-    Sets the dimensions of this texture object. The default
-    for each dimension is 1. The maximum allowable texture size
-    is dependent upon your OpenGL implementation. Allocating
-    storage for a texture less than the maximum size can still
-    fail if your system is low on resources.
+    Sets the dimensions of this texture object to \a width,
+    \a height, and \a depth. The default for each dimension is 1.
+    The maximum allowable texture size is dependent upon your OpenGL
+    implementation. Allocating storage for a texture less than the
+    maximum size can still fail if your system is low on resources.
 
     \sa width(), height(), depth()
 */
@@ -1892,8 +1926,8 @@ int QOpenGLTexture::depth() const
 }
 
 /*!
-    For texture targets that support mipmaps this function
-    sets the requested number of mipmap levels to allocate storage
+    For texture targets that support mipmaps, this function
+    sets the requested number of mipmap \a levels to allocate storage
     for. This function should be called before storage is allocated
     for the texture.
 
@@ -1958,11 +1992,10 @@ int QOpenGLTexture::maximumMipLevels() const
 }
 
 /*!
-    For those texture targets that support array layers this function
-    sets the number of array layers to allocate storage for. This
-    function should be called before storage is allocated for the tecture.
+    Sets the number of array \a layers to allocate storage for. This
+    function should be called before storage is allocated for the texture.
 
-    For tarets that do not support array layers this function has
+    For targets that do not support array layers this function has
     no effect.
 
     \sa layers(), isStorageAllocated()
@@ -2083,13 +2116,13 @@ bool QOpenGLTexture::isStorageAllocated() const
     Simpliar constraints apply for the \a viewFormat. See the above link
     and the specification for more details.
 
-    The \a minimumMipmapLevel, \a maximumMipmapLevel, \a mimimumLayer,
+    The \a minimumMipmapLevel, \a maximumMipmapLevel, \a minimumLayer,
     and \a maximumLayer arguments serve to restrict the parts of the
     texture accessible by the texture view.
 
     If creation of the texture view fails this function will return
     0. If the function succeeds it will return a pointer to a new
-    QOpenGLTexture object that will return true from its isTextureView()
+    QOpenGLTexture object that will return \c true from its isTextureView()
     function.
 
     \sa isTextureView()
@@ -2125,7 +2158,7 @@ bool QOpenGLTexture::isTextureView() const
 }
 
 /*!
-    Uploads pixel \a data for this texture object \a mipLevel, array \a layer and \acubeFace.
+    Uploads pixel \a data for this texture object \a mipLevel, array \a layer, and \a cubeFace.
     Storage must have been allocated before uploading pixel data. Some overloads of setData()
     will set appropriate dimensions, mipmap levels, and array layers and then allocate storage
     for you if they have enough information to do so. This will be noted in the function
@@ -2252,6 +2285,8 @@ void QOpenGLTexture::setData(PixelFormat sourceFormat, PixelType sourceType,
 
 /*!
     This overload of setData() will allocate storage for you.
+    The pixel data is contained in \a image. Mipmaps are generated by default.
+    Set \a genMipMaps to \l DontGenerateMipMaps to turn off mipmap generation.
 
     \overload
 */
@@ -2270,7 +2305,7 @@ void QOpenGLTexture::setData(const QImage& image, MipMapGeneration genMipMaps)
 }
 
 /*!
-    Uploads compressed pixel \a data to \a mipLevel, array \a layer and \a cubeFace.
+    Uploads compressed pixel \a data to \a mipLevel, array \a layer, and \a cubeFace.
     The pixel transfer can optionally be controlled with \a options. The \a dataSize
     argument should specify the size of the data pointed to by \a data.
 
@@ -2395,78 +2430,87 @@ bool QOpenGLTexture::hasFeature(Feature feature)
     QSurfaceFormat f = ctx->format();
 
     bool supported = false;
-    switch (feature) {
+
 #if !defined(QT_OPENGL_ES_2)
-    case ImmutableMultisampleStorage:
-    case TextureBuffer:
-    case StencilTexturing:
-        supported = f.version() >= qMakePair(4, 3);
-        break;
+    if (!ctx->isOpenGLES()) {
+        switch (feature) {
+        case ImmutableMultisampleStorage:
+        case TextureBuffer:
+        case StencilTexturing:
+            supported = f.version() >= qMakePair(4, 3);
+            break;
 
-    case ImmutableStorage:
-        supported = f.version() >= qMakePair(4, 2);
-        break;
+        case ImmutableStorage:
+            supported = f.version() >= qMakePair(4, 2);
+            break;
 
-    case TextureCubeMapArrays:
-        supported = f.version() >= qMakePair(4, 0);
-        break;
+        case TextureCubeMapArrays:
+            supported = f.version() >= qMakePair(4, 0);
+            break;
 
-    case Swizzle:
-        supported = f.version() >= qMakePair(3, 3);
-        break;
+        case Swizzle:
+            supported = f.version() >= qMakePair(3, 3);
+            break;
 
-    case TextureMultisample:
-        supported = f.version() >= qMakePair(3, 2);
-        break;
+        case TextureMultisample:
+            supported = f.version() >= qMakePair(3, 2);
+            break;
 
-    case TextureArrays:
-        supported = f.version() >= qMakePair(3, 0);
-        break;
+        case TextureArrays:
+            supported = f.version() >= qMakePair(3, 0);
+            break;
 
-    case TextureRectangle:
-        supported = f.version() >= qMakePair(2, 1);
-        break;
+        case TextureRectangle:
+            supported = f.version() >= qMakePair(2, 1);
+            break;
 
-    case Texture3D:
-        supported = f.version() >= qMakePair(1, 3);
-        break;
+        case Texture3D:
+            supported = f.version() >= qMakePair(1, 3);
+            break;
 
-    case AnisotropicFiltering:
-        supported = ctx->hasExtension(QByteArrayLiteral("GL_EXT_texture_filter_anisotropic"));
-        break;
+        case AnisotropicFiltering:
+            supported = ctx->hasExtension(QByteArrayLiteral("GL_EXT_texture_filter_anisotropic"));
+            break;
 
-    case NPOTTextures:
-    case NPOTTextureRepeat:
-        supported = ctx->hasExtension(QByteArrayLiteral("GL_ARB_texture_non_power_of_two"));
-        break;
+        case NPOTTextures:
+        case NPOTTextureRepeat:
+            supported = ctx->hasExtension(QByteArrayLiteral("GL_ARB_texture_non_power_of_two"));
+            break;
 
-    case Texture1D:
-        supported = f.version() >= qMakePair(1, 1);
-        break;
+        case Texture1D:
+            supported = f.version() >= qMakePair(1, 1);
+            break;
 
-    case MaxFeatureFlag:
-        break;
-    }
+        case MaxFeatureFlag:
+            break;
 
-#else
-    case Texture3D:
-        supported = ctx->hasExtension(QByteArrayLiteral("GL_OES_texture_3D"));
-        break;
-    case AnisotropicFiltering:
-        supported = ctx->hasExtension(QByteArrayLiteral("GL_EXT_texture_filter_anisotropic"));
-        break;
-    case NPOTTextures:
-    case NPOTTextureRepeat:
-        supported = f.version() >= qMakePair(3,0);
-        if (!supported) {
-            supported = ctx->hasExtension(QByteArrayLiteral("GL_OES_texture_npot"));
-            if (!supported)
-                supported = ctx->hasExtension(QByteArrayLiteral("GL_ARB_texture_non_power_of_two"));
+        default:
+            break;
         }
-    default:
-        break;
     }
+
+    if (ctx->isOpenGLES())
 #endif
+    {
+        switch (feature) {
+        case Texture3D:
+            supported = ctx->hasExtension(QByteArrayLiteral("GL_OES_texture_3D"));
+            break;
+        case AnisotropicFiltering:
+            supported = ctx->hasExtension(QByteArrayLiteral("GL_EXT_texture_filter_anisotropic"));
+            break;
+        case NPOTTextures:
+        case NPOTTextureRepeat:
+            supported = f.version() >= qMakePair(3,0);
+            if (!supported) {
+                supported = ctx->hasExtension(QByteArrayLiteral("GL_OES_texture_npot"));
+                if (!supported)
+                    supported = ctx->hasExtension(QByteArrayLiteral("GL_ARB_texture_non_power_of_two"));
+            }
+        default:
+            break;
+        }
+    }
 
     return supported;
 }
@@ -2480,17 +2524,20 @@ bool QOpenGLTexture::hasFeature(Feature feature)
 void QOpenGLTexture::setMipBaseLevel(int baseLevel)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->textureId);
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(baseLevel <= d->maxLevel);
-    d->baseLevel = baseLevel;
-    d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BASE_LEVEL, baseLevel);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->textureId);
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(baseLevel <= d->maxLevel);
+        d->baseLevel = baseLevel;
+        d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BASE_LEVEL, baseLevel);
+        return;
+    }
 #else
     Q_UNUSED(baseLevel);
-    qWarning("QOpenGLTexture: Mipmap base level is not supported");
 #endif
+    qWarning("QOpenGLTexture: Mipmap base level is not supported");
 }
 
 /*!
@@ -2514,17 +2561,20 @@ int QOpenGLTexture::mipBaseLevel() const
 void QOpenGLTexture::setMipMaxLevel(int maxLevel)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->textureId);
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->baseLevel <= maxLevel);
-    d->maxLevel = maxLevel;
-    d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LEVEL, maxLevel);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->textureId);
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->baseLevel <= maxLevel);
+        d->maxLevel = maxLevel;
+        d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LEVEL, maxLevel);
+        return;
+    }
 #else
     Q_UNUSED(maxLevel);
-    qWarning("QOpenGLTexture: Mipmap max level is not supported");
 #endif
+    qWarning("QOpenGLTexture: Mipmap max level is not supported");
 }
 
 /*!
@@ -2548,18 +2598,21 @@ int QOpenGLTexture::mipMaxLevel() const
 void QOpenGLTexture::setMipLevelRange(int baseLevel, int maxLevel)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->textureId);
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(baseLevel <= maxLevel);
-    d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BASE_LEVEL, baseLevel);
-    d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LEVEL, maxLevel);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->textureId);
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(baseLevel <= maxLevel);
+        d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BASE_LEVEL, baseLevel);
+        d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LEVEL, maxLevel);
+        return;
+    }
 #else
     Q_UNUSED(baseLevel);
     Q_UNUSED(maxLevel);
-    qWarning("QOpenGLTexture: Mipmap level range is not supported");
 #endif
+    qWarning("QOpenGLTexture: Mipmap level range is not supported");
 }
 
 /*!
@@ -2574,7 +2627,7 @@ QPair<int, int> QOpenGLTexture::mipLevelRange() const
 }
 
 /*!
-    If \a enabled is true, enables automatic mipmap generation for this texture object
+    If \a enabled is \c true, enables automatic mipmap generation for this texture object
     to occur whenever the level 0 mipmap data is set via setData().
 
     The automatic mipmap generation is enabled by default.
@@ -2615,14 +2668,14 @@ void QOpenGLTexture::generateMipMaps()
 }
 
 /*!
-    Generates mipmaps for this texture object from mipmap level \baseLevel. If you are
+    Generates mipmaps for this texture object from mipmap level \a baseLevel. If you are
     using a texture target and filtering option that requires mipmaps and you
     have disabled automatic mipmap generation then you need to call this function
     or the overload to create the mipmap chain.
 
-    The generation of mipmaps to above \baseLevel is achieved by setting the mipmap
+    The generation of mipmaps to above \a baseLevel is achieved by setting the mipmap
     base level to \a baseLevel and then generating the mipmap chain. If \a resetBaseLevel
-    is true, then the baseLevel of the texture will be reset to its previous value.
+    is \c true, then the baseLevel of the texture will be reset to its previous value.
 
     \sa setAutoMipMapGenerationEnabled(), setMipLevels(), mipLevels()
 */
@@ -2655,51 +2708,59 @@ void QOpenGLTexture::generateMipMaps(int baseLevel, bool resetBaseLevel)
 void QOpenGLTexture::setSwizzleMask(SwizzleComponent component, SwizzleValue value)
 {
 #if !defined(Q_OS_MAC) && !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    if (!d->features.testFlag(Swizzle)) {
-        qWarning("QOpenGLTexture::setSwizzleMask() requires OpenGL >= 3.3");
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        if (!d->features.testFlag(Swizzle)) {
+            qWarning("QOpenGLTexture::setSwizzleMask() requires OpenGL >= 3.3");
+            return;
+        }
+        d->swizzleMask[component - SwizzleRed] = value;
+        d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, component, value);
         return;
     }
-    d->swizzleMask[component - SwizzleRed] = value;
-    d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, component, value);
 #else
     Q_UNUSED(component);
     Q_UNUSED(value);
-    qWarning("QOpenGLTexture: Texture swizzling is not supported");
 #endif
+    qWarning("QOpenGLTexture: Texture swizzling is not supported");
 }
 
 /*!
+    Parameters \a {r}, \a {g}, \a {b}, and \a {a}  are values used for setting
+    the colors red, green, blue, and the alpha value.
     \overload
 */
 void QOpenGLTexture::setSwizzleMask(SwizzleValue r, SwizzleValue g,
                                     SwizzleValue b, SwizzleValue a)
 {
 #if !defined(Q_OS_MAC) && !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    if (!d->features.testFlag(Swizzle)) {
-        qWarning("QOpenGLTexture::setSwizzleMask() requires OpenGL >= 3.3");
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        if (!d->features.testFlag(Swizzle)) {
+            qWarning("QOpenGLTexture::setSwizzleMask() requires OpenGL >= 3.3");
+            return;
+        }
+        GLint swizzleMask[] = {GLint(r), GLint(g), GLint(b), GLint(a)};
+        d->swizzleMask[0] = r;
+        d->swizzleMask[1] = g;
+        d->swizzleMask[2] = b;
+        d->swizzleMask[3] = a;
+        d->texFuncs->glTextureParameteriv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_SWIZZLE_RGBA, swizzleMask);
         return;
     }
-    GLint swizzleMask[] = {GLint(r), GLint(g), GLint(b), GLint(a)};
-    d->swizzleMask[0] = r;
-    d->swizzleMask[1] = g;
-    d->swizzleMask[2] = b;
-    d->swizzleMask[3] = a;
-    d->texFuncs->glTextureParameteriv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_SWIZZLE_RGBA, swizzleMask);
 #else
     Q_UNUSED(r);
     Q_UNUSED(g);
     Q_UNUSED(b);
     Q_UNUSED(a);
-    qWarning("QOpenGLTexture: Texture swizzling is not supported");
 #endif
+    qWarning("QOpenGLTexture: Texture swizzling is not supported");
 }
 
 /*!
@@ -2725,20 +2786,23 @@ QOpenGLTexture::SwizzleValue QOpenGLTexture::swizzleMask(SwizzleComponent compon
 void QOpenGLTexture::setDepthStencilMode(QOpenGLTexture::DepthStencilMode mode)
 {
 #if !defined(Q_OS_MAC) && !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    if (!d->features.testFlag(StencilTexturing)) {
-        qWarning("QOpenGLTexture::setDepthStencilMode() requires OpenGL >= 4.3");
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        if (!d->features.testFlag(StencilTexturing)) {
+            qWarning("QOpenGLTexture::setDepthStencilMode() requires OpenGL >= 4.3");
+            return;
+        }
+        d->depthStencilMode = mode;
+        d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_DEPTH_STENCIL_TEXTURE_MODE, mode);
         return;
     }
-    d->depthStencilMode = mode;
-    d->texFuncs->glTextureParameteri(d->textureId, d->target, d->bindingTarget, GL_DEPTH_STENCIL_TEXTURE_MODE, mode);
 #else
     Q_UNUSED(mode);
-    qWarning("QOpenGLTexture: DepthStencil Mode is not supported");
 #endif
+    qWarning("QOpenGLTexture: DepthStencil Mode is not supported");
 }
 
 /*!
@@ -2881,6 +2945,7 @@ void QOpenGLTexture::setWrapMode(QOpenGLTexture::WrapMode mode)
 }
 
 /*!
+    Holds the texture dimension \a direction.
     \overload
 */
 void QOpenGLTexture::setWrapMode(QOpenGLTexture::CoordinateDirection direction, QOpenGLTexture::WrapMode mode)
@@ -2912,109 +2977,127 @@ QOpenGLTexture::WrapMode QOpenGLTexture::wrapMode(QOpenGLTexture::CoordinateDire
 void QOpenGLTexture::setBorderColor(QColor color)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    float values[4];
-    values[0] = color.redF();
-    values[1] = color.greenF();
-    values[2] = color.blueF();
-    values[3] = color.alphaF();
-    d->borderColor.clear();
-    for (int i = 0; i < 4; ++i)
-        d->borderColor.append(QVariant(values[i]));
-    d->texFuncs->glTextureParameterfv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        float values[4];
+        values[0] = color.redF();
+        values[1] = color.greenF();
+        values[2] = color.blueF();
+        values[3] = color.alphaF();
+        d->borderColor.clear();
+        for (int i = 0; i < 4; ++i)
+            d->borderColor.append(QVariant(values[i]));
+        d->texFuncs->glTextureParameterfv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+        return;
+    }
 #else
     Q_UNUSED(color);
-    qWarning("QOpenGLTexture: Border color is not supported");
 #endif
+    qWarning("QOpenGLTexture: Border color is not supported");
 }
 
 /*!
+    Sets the color red to \a {r}, green to \a {g}, blue to \a {b}, and \a {a} to the
+    alpha value.
     \overload
 */
 void QOpenGLTexture::setBorderColor(float r, float g, float b, float a)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    float values[4];
-    values[0] = r;
-    values[1] = g;
-    values[2] = b;
-    values[3] = a;
-    d->borderColor.clear();
-    for (int i = 0; i < 4; ++i)
-        d->borderColor.append(QVariant(values[i]));
-    d->texFuncs->glTextureParameterfv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        float values[4];
+        values[0] = r;
+        values[1] = g;
+        values[2] = b;
+        values[3] = a;
+        d->borderColor.clear();
+        for (int i = 0; i < 4; ++i)
+            d->borderColor.append(QVariant(values[i]));
+        d->texFuncs->glTextureParameterfv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+        return;
+    }
 #else
     Q_UNUSED(r);
     Q_UNUSED(g);
     Q_UNUSED(b);
     Q_UNUSED(a);
-    qWarning("QOpenGLTexture: Border color is not supported");
 #endif
+    qWarning("QOpenGLTexture: Border color is not supported");
 }
 
 /*!
+    Sets the color red to \a {r}, green to \a {g}, blue to \a {b}, and the alpha
+    value to \a {a}.
     \overload
 */
 void QOpenGLTexture::setBorderColor(int r, int g, int b, int a)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    int values[4];
-    values[0] = r;
-    values[1] = g;
-    values[2] = b;
-    values[3] = a;
-    d->borderColor.clear();
-    for (int i = 0; i < 4; ++i)
-        d->borderColor.append(QVariant(values[i]));
-    d->texFuncs->glTextureParameteriv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        int values[4];
+        values[0] = r;
+        values[1] = g;
+        values[2] = b;
+        values[3] = a;
+        d->borderColor.clear();
+        for (int i = 0; i < 4; ++i)
+            d->borderColor.append(QVariant(values[i]));
+        d->texFuncs->glTextureParameteriv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+        return;
+    }
 #else
     Q_UNUSED(r);
     Q_UNUSED(g);
     Q_UNUSED(b);
     Q_UNUSED(a);
-    qWarning("QOpenGLTexture: Border color is not supported");
 #endif
+    qWarning("QOpenGLTexture: Border color is not supported");
 
     // TODO Handle case of using glTextureParameterIiv() based on format
 }
 
 /*!
+    Sets the color red to \a {r}, green to \a {g}, blue to \a {b}, and the alpha
+    value to \a {a}.
     \overload
 */
 void QOpenGLTexture::setBorderColor(uint r, uint g, uint b, uint a)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    int values[4];
-    values[0] = int(r);
-    values[1] = int(g);
-    values[2] = int(b);
-    values[3] = int(a);
-    d->borderColor.clear();
-    for (int i = 0; i < 4; ++i)
-        d->borderColor.append(QVariant(values[i]));
-    d->texFuncs->glTextureParameteriv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        int values[4];
+        values[0] = int(r);
+        values[1] = int(g);
+        values[2] = int(b);
+        values[3] = int(a);
+        d->borderColor.clear();
+        for (int i = 0; i < 4; ++i)
+            d->borderColor.append(QVariant(values[i]));
+        d->texFuncs->glTextureParameteriv(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_BORDER_COLOR, values);
+        return;
+    }
 #else
     Q_UNUSED(r);
     Q_UNUSED(g);
     Q_UNUSED(b);
     Q_UNUSED(a);
-    qWarning("QOpenGLTexture: Border color is not supported");
 #endif
+    qWarning("QOpenGLTexture: Border color is not supported");
 
     // TODO Handle case of using glTextureParameterIuiv() based on format
 }
@@ -3038,7 +3121,7 @@ QColor QOpenGLTexture::borderColor() const
 }
 
 /*!
-    Writes the texture border color into the first 4 elements
+    Writes the texture border color into the first four elements
     of the array pointed to by \a border.
 
     \sa setBorderColor()
@@ -3057,6 +3140,9 @@ void QOpenGLTexture::borderColor(float *border) const
 }
 
 /*!
+    Writes the texture border color into the first four elements
+    of the array pointed to by \a border.
+
     \overload
 */
 void QOpenGLTexture::borderColor(int *border) const
@@ -3073,6 +3159,9 @@ void QOpenGLTexture::borderColor(int *border) const
 }
 
 /*!
+    Writes the texture border color into the first four elements
+    of the array pointed to by \a border.
+
     \overload
 */
 void QOpenGLTexture::borderColor(unsigned int *border) const
@@ -3098,17 +3187,20 @@ void QOpenGLTexture::borderColor(unsigned int *border) const
 void QOpenGLTexture::setMinimumLevelOfDetail(float value)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    Q_ASSERT(value < d->maxLevelOfDetail);
-    d->minLevelOfDetail = value;
-    d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MIN_LOD, value);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        Q_ASSERT(value < d->maxLevelOfDetail);
+        d->minLevelOfDetail = value;
+        d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MIN_LOD, value);
+        return;
+    }
 #else
     Q_UNUSED(value);
-    qWarning("QOpenGLTexture: Detail level is not supported");
 #endif
+    qWarning("QOpenGLTexture: Detail level is not supported");
 }
 
 /*!
@@ -3132,17 +3224,20 @@ float QOpenGLTexture::minimumLevelOfDetail() const
 void QOpenGLTexture::setMaximumLevelOfDetail(float value)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    Q_ASSERT(value > d->minLevelOfDetail);
-    d->maxLevelOfDetail = value;
-    d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LOD, value);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        Q_ASSERT(value > d->minLevelOfDetail);
+        d->maxLevelOfDetail = value;
+        d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LOD, value);
+        return;
+    }
 #else
     Q_UNUSED(value);
-    qWarning("QOpenGLTexture: Detail level is not supported");
 #endif
+    qWarning("QOpenGLTexture: Detail level is not supported");
 }
 
 /*!
@@ -3157,28 +3252,31 @@ float QOpenGLTexture::maximumLevelOfDetail() const
 }
 
 /*!
-    Sets the minimum and maximum level of detail parameters.
-
+    Sets the minimum level of detail parameters to \a min and the maximum level
+    to \a max.
     \note This function has no effect on Qt built for OpenGL ES 2.
     \sa levelOfDetailRange(), setMinimumLevelOfDetail(), setMaximumLevelOfDetail()
 */
 void QOpenGLTexture::setLevelOfDetailRange(float min, float max)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    Q_ASSERT(min < max);
-    d->minLevelOfDetail = min;
-    d->maxLevelOfDetail = max;
-    d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MIN_LOD, min);
-    d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LOD, max);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        Q_ASSERT(min < max);
+        d->minLevelOfDetail = min;
+        d->maxLevelOfDetail = max;
+        d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MIN_LOD, min);
+        d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_MAX_LOD, max);
+        return;
+    }
 #else
     Q_UNUSED(min);
     Q_UNUSED(max);
-    qWarning("QOpenGLTexture: Detail level is not supported");
 #endif
+    qWarning("QOpenGLTexture: Detail level is not supported");
 }
 
 /*!
@@ -3193,7 +3291,10 @@ QPair<float, float> QOpenGLTexture::levelOfDetailRange() const
 }
 
 /*!
-    Sets the level of detail bias parameter.
+    Sets the level of detail bias to \a bias.
+    Level of detail bias affects the point at which mipmapping levels change.
+    Increasing values for level of detail bias makes the overall images blurrier
+    or smoother. Decreasing values make the overall images sharper.
 
     \note This function has no effect on Qt built for OpenGL ES 2.
     \sa levelofDetailBias()
@@ -3201,16 +3302,19 @@ QPair<float, float> QOpenGLTexture::levelOfDetailRange() const
 void QOpenGLTexture::setLevelofDetailBias(float bias)
 {
 #if !defined(QT_OPENGL_ES_2)
-    Q_D(QOpenGLTexture);
-    d->create();
-    Q_ASSERT(d->texFuncs);
-    Q_ASSERT(d->textureId);
-    d->levelOfDetailBias = bias;
-    d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_LOD_BIAS, bias);
+    if (!QOpenGLContext::currentContext()->isOpenGLES()) {
+        Q_D(QOpenGLTexture);
+        d->create();
+        Q_ASSERT(d->texFuncs);
+        Q_ASSERT(d->textureId);
+        d->levelOfDetailBias = bias;
+        d->texFuncs->glTextureParameterf(d->textureId, d->target, d->bindingTarget, GL_TEXTURE_LOD_BIAS, bias);
+        return;
+    }
 #else
     Q_UNUSED(bias);
-    qWarning("QOpenGLTexture: Detail level is not supported");
 #endif
+    qWarning("QOpenGLTexture: Detail level is not supported");
 }
 
 /*!

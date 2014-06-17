@@ -433,7 +433,7 @@ void QHostInfo::setErrorString(const QString &str)
 
     Returns the DNS domain of this machine.
 
-    Note: DNS domains are not related to domain names found in
+    \note DNS domains are not related to domain names found in
     Windows networks.
 
     \sa hostName()
@@ -508,7 +508,7 @@ QHostInfoLookupManager::QHostInfoLookupManager() : mutex(QMutex::Recursive), was
 {
     moveToThread(QCoreApplicationPrivate::mainThread());
     connect(QCoreApplication::instance(), SIGNAL(destroyed()), SLOT(waitForThreadPoolDone()), Qt::DirectConnection);
-    threadPool.setMaxThreadCount(5); // do 5 DNS lookups in parallel
+    threadPool.setMaxThreadCount(20); // do up to 20 DNS lookups in parallel
 }
 
 QHostInfoLookupManager::~QHostInfoLookupManager()

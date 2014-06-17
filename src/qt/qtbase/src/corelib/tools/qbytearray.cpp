@@ -3266,6 +3266,39 @@ QByteArray QByteArray::rightJustified(int width, char fill, bool truncate) const
 
 bool QByteArray::isNull() const { return d == QArrayData::sharedNull(); }
 
+static qlonglong toIntegral_helper(const char *data, bool *ok, int base, qlonglong)
+{
+    return QLocaleData::bytearrayToLongLong(data, base, ok);
+}
+
+static qulonglong toIntegral_helper(const char *data, bool *ok, int base, qulonglong)
+{
+    return QLocaleData::bytearrayToUnsLongLong(data, base, ok);
+}
+
+template <typename T> static inline
+T toIntegral_helper(const char *data, bool *ok, int base)
+{
+    // ### Qt6: use std::conditional<std::is_unsigned<T>::value, qulonglong, qlonglong>::type
+    const bool isUnsigned = T(0) < T(-1);
+    typedef typename QtPrivate::QConditional<isUnsigned, qulonglong, qlonglong>::Type Int64;
+
+#if defined(QT_CHECK_RANGE)
+    if (base != 0 && (base < 2 || base > 36)) {
+        qWarning("QByteArray::toIntegral: Invalid base %d", base);
+        base = 10;
+    }
+#endif
+
+    // we select the right overload by the last, unused parameter
+    Int64 val = toIntegral_helper(data, ok, base, Int64());
+    if (T(val) != val) {
+        if (ok)
+            *ok = false;
+        val = 0;
+    }
+    return T(val);
+}
 
 /*!
     Returns the byte array converted to a \c {long long} using base \a
@@ -3289,14 +3322,7 @@ bool QByteArray::isNull() const { return d == QArrayData::sharedNull(); }
 
 qlonglong QByteArray::toLongLong(bool *ok, int base) const
 {
-#if defined(QT_CHECK_RANGE)
-    if (base != 0 && (base < 2 || base > 36)) {
-        qWarning("QByteArray::toLongLong: Invalid base %d", base);
-        base = 10;
-    }
-#endif
-
-    return QLocalePrivate::bytearrayToLongLong(nulTerminated().constData(), base, ok);
+    return toIntegral_helper<qlonglong>(nulTerminated().constData(), ok, base);
 }
 
 /*!
@@ -3322,16 +3348,8 @@ qlonglong QByteArray::toLongLong(bool *ok, int base) const
 
 qulonglong QByteArray::toULongLong(bool *ok, int base) const
 {
-#if defined(QT_CHECK_RANGE)
-    if (base != 0 && (base < 2 || base > 36)) {
-        qWarning("QByteArray::toULongLong: Invalid base %d", base);
-        base = 10;
-    }
-#endif
-
-    return QLocalePrivate::bytearrayToUnsLongLong(nulTerminated().constData(), base, ok);
+    return toIntegral_helper<qulonglong>(nulTerminated().constData(), ok, base);
 }
-
 
 /*!
     Returns the byte array converted to an \c int using base \a
@@ -3357,13 +3375,7 @@ qulonglong QByteArray::toULongLong(bool *ok, int base) const
 
 int QByteArray::toInt(bool *ok, int base) const
 {
-    qlonglong v = toLongLong(ok, base);
-    if (v < INT_MIN || v > INT_MAX) {
-        if (ok)
-            *ok = false;
-        v = 0;
-    }
-    return int(v);
+    return toIntegral_helper<int>(nulTerminated().constData(), ok, base);
 }
 
 /*!
@@ -3388,13 +3400,7 @@ int QByteArray::toInt(bool *ok, int base) const
 
 uint QByteArray::toUInt(bool *ok, int base) const
 {
-    qulonglong v = toULongLong(ok, base);
-    if (v > UINT_MAX) {
-        if (ok)
-            *ok = false;
-        v = 0;
-    }
-    return uint(v);
+    return toIntegral_helper<uint>(nulTerminated().constData(), ok, base);
 }
 
 /*!
@@ -3422,13 +3428,7 @@ uint QByteArray::toUInt(bool *ok, int base) const
 */
 long QByteArray::toLong(bool *ok, int base) const
 {
-    qlonglong v = toLongLong(ok, base);
-    if (v < LONG_MIN || v > LONG_MAX) {
-        if (ok)
-            *ok = false;
-        v = 0;
-    }
-    return long(v);
+    return toIntegral_helper<long>(nulTerminated().constData(), ok, base);
 }
 
 /*!
@@ -3454,13 +3454,7 @@ long QByteArray::toLong(bool *ok, int base) const
 */
 ulong QByteArray::toULong(bool *ok, int base) const
 {
-    qulonglong v = toULongLong(ok, base);
-    if (v > ULONG_MAX) {
-        if (ok)
-            *ok = false;
-        v = 0;
-    }
-    return ulong(v);
+    return toIntegral_helper<ulong>(nulTerminated().constData(), ok, base);
 }
 
 /*!
@@ -3485,13 +3479,7 @@ ulong QByteArray::toULong(bool *ok, int base) const
 
 short QByteArray::toShort(bool *ok, int base) const
 {
-    qlonglong v = toLongLong(ok, base);
-    if (v < SHRT_MIN || v > SHRT_MAX) {
-        if (ok)
-            *ok = false;
-        v = 0;
-    }
-    return short(v);
+    return toIntegral_helper<short>(nulTerminated().constData(), ok, base);
 }
 
 /*!
@@ -3516,13 +3504,7 @@ short QByteArray::toShort(bool *ok, int base) const
 
 ushort QByteArray::toUShort(bool *ok, int base) const
 {
-    qulonglong v = toULongLong(ok, base);
-    if (v > USHRT_MAX) {
-        if (ok)
-            *ok = false;
-        v = 0;
-    }
-    return ushort(v);
+    return toIntegral_helper<ushort>(nulTerminated().constData(), ok, base);
 }
 
 
@@ -3544,7 +3526,7 @@ ushort QByteArray::toUShort(bool *ok, int base) const
 
 double QByteArray::toDouble(bool *ok) const
 {
-    return QLocalePrivate::bytearrayToDouble(nulTerminated().constData(), ok);
+    return QLocaleData::bytearrayToDouble(nulTerminated().constData(), ok);
 }
 
 /*!
@@ -3563,7 +3545,7 @@ double QByteArray::toDouble(bool *ok) const
 
 float QByteArray::toFloat(bool *ok) const
 {
-    return float(toDouble(ok));
+    return QLocaleData::convertDoubleToFloat(toDouble(ok), ok);
 }
 
 /*!
@@ -3683,12 +3665,6 @@ QByteArray QByteArray::toBase64(Base64Options options) const
     \sa toUShort()
 */
 
-/*!
-    \overload
-
-    \sa toLongLong()
-*/
-
 static char *qulltoa2(char *p, qulonglong n, int base)
 {
 #if defined(QT_CHECK_RANGE)
@@ -3707,6 +3683,11 @@ static char *qulltoa2(char *p, qulonglong n, int base)
     return p;
 }
 
+/*!
+    \overload
+
+    \sa toLongLong()
+*/
 QByteArray &QByteArray::setNum(qlonglong n, int base)
 {
     const int buffsize = 66; // big enough for MAX_ULLONG in base 2
@@ -3772,22 +3753,22 @@ QByteArray &QByteArray::setNum(qulonglong n, int base)
 
 QByteArray &QByteArray::setNum(double n, char f, int prec)
 {
-    QLocalePrivate::DoubleForm form = QLocalePrivate::DFDecimal;
+    QLocaleData::DoubleForm form = QLocaleData::DFDecimal;
     uint flags = 0;
 
     if (qIsUpper(f))
-        flags = QLocalePrivate::CapitalEorX;
+        flags = QLocaleData::CapitalEorX;
     f = qToLower(f);
 
     switch (f) {
         case 'f':
-            form = QLocalePrivate::DFDecimal;
+            form = QLocaleData::DFDecimal;
             break;
         case 'e':
-            form = QLocalePrivate::DFExponent;
+            form = QLocaleData::DFExponent;
             break;
         case 'g':
-            form = QLocalePrivate::DFSignificantDigits;
+            form = QLocaleData::DFSignificantDigits;
             break;
         default:
 #if defined(QT_CHECK_RANGE)
@@ -3796,8 +3777,7 @@ QByteArray &QByteArray::setNum(double n, char f, int prec)
             break;
     }
 
-    QLocale locale(QLocale::C);
-    *this = locale.d->doubleToString(n, prec, form, -1, flags).toLatin1();
+    *this = QLocaleData::c()->doubleToString(n, prec, form, -1, flags).toLatin1();
     return *this;
 }
 
@@ -4205,6 +4185,91 @@ QByteArray QByteArray::fromPercentEncoding(const QByteArray &input, char percent
     q_fromPercentEncoding(&tmp, percent);
     return tmp;
 }
+
+/*! \fn QByteArray QByteArray::fromCFData(CFDataRef data)
+    \since 5.3
+
+    Constructs a new QByteArray containing a copy of the CFData \a data.
+
+    \sa fromRawCFData(), fromRawData(), toRawCFData(), toCFData()
+*/
+
+/*! \fn QByteArray QByteArray::fromRawCFData(CFDataRef data)
+    \since 5.3
+
+    Constructs a QByteArray that uses the bytes of the CFData \a data.
+
+    The \a data's bytes are not copied.
+
+    The caller guarantees that the CFData will not be deleted
+    or modified as long as this QByteArray object exists.
+
+    \sa fromCFData(), fromRawData(), toRawCFData(), toCFData()
+*/
+
+/*! \fn CFDataRef QByteArray::toCFData() const
+    \since 5.3
+
+    Creates a CFData from a QByteArray. The caller owns the CFData object
+    and is responsible for releasing it.
+
+    \sa toRawCFData(), fromCFData(), fromRawCFData(), fromRawData()
+*/
+
+/*! \fn CFDataRef QByteArray::toRawCFData() const
+    \since 5.3
+
+    Constructs a CFData that uses the bytes of the QByteArray.
+
+    The QByteArray's bytes are not copied.
+
+    The caller guarantees that the QByteArray will not be deleted
+    or modified as long as this CFData object exists.
+
+    \sa toCFData(), fromRawCFData(), fromCFData(), fromRawData()
+*/
+
+/*! \fn QByteArray QByteArray::fromNSData(const NSData *data)
+    \since 5.3
+
+    Constructs a new QByteArray containing a copy of the NSData \a data.
+
+    \sa fromRawNSData(), fromRawData(), toNSData(), toRawNSData()
+*/
+
+/*! \fn QByteArray QByteArray::fromRawNSData(const NSData *data)
+    \since 5.3
+
+    Constructs a QByteArray that uses the bytes of the NSData \a data.
+
+    The \a data's bytes are not copied.
+
+    The caller guarantees that the NSData will not be deleted
+    or modified as long as this QByteArray object exists.
+
+    \sa fromNSData(), fromRawData(), toRawNSData(), toNSData()
+*/
+
+/*! \fn NSData QByteArray::toNSData() const
+    \since 5.3
+
+    Creates a NSData from a QByteArray. The NSData object is autoreleased.
+
+    \sa fromNSData(), fromRawNSData(), fromRawData(), toRawNSData()
+*/
+
+/*! \fn NSData QByteArray::toRawNSData() const
+    \since 5.3
+
+    Constructs a NSData that uses the bytes of the QByteArray.
+
+    The QByteArray's bytes are not copied.
+
+    The caller guarantees that the QByteArray will not be deleted
+    or modified as long as this NSData object exists.
+
+    \sa fromRawNSData(), fromNSData(), fromRawData(), toNSData()
+*/
 
 static inline bool q_strchr(const char str[], char chr)
 {

@@ -69,7 +69,8 @@ QEGLPlatformCursor::QEGLPlatformCursor(QPlatformScreen *screen)
       m_vertexCoordEntry(0),
       m_textureCoordEntry(0),
       m_textureEntry(0),
-      m_deviceListener(0)
+      m_deviceListener(0),
+      m_updater(screen)
 {
     QByteArray hideCursorVal = qgetenv("QT_QPA_EGLFS_HIDECURSOR");
     if (!hideCursorVal.isEmpty())
@@ -210,7 +211,7 @@ void QEGLPlatformCursor::initCursorAtlas()
     m_cursorAtlas.cursorsPerRow = cursorsPerRow;
 
     const QJsonArray hotSpots = object.value(QLatin1String("hotSpots")).toArray();
-    Q_ASSERT(hotSpots.count() == Qt::LastCursor);
+    Q_ASSERT(hotSpots.count() == Qt::LastCursor + 1);
     for (int i = 0; i < hotSpots.count(); i++) {
         QPoint hotSpot(hotSpots[i].toArray()[0].toDouble(), hotSpots[i].toArray()[1].toDouble());
         m_cursorAtlas.hotSpots << hotSpot;
@@ -218,7 +219,7 @@ void QEGLPlatformCursor::initCursorAtlas()
 
     QImage image = QImage(atlas).convertToFormat(QImage::Format_ARGB32_Premultiplied);
     m_cursorAtlas.cursorWidth = image.width() / m_cursorAtlas.cursorsPerRow;
-    m_cursorAtlas.cursorHeight = image.height() / ((Qt::LastCursor + cursorsPerRow - 1) / cursorsPerRow);
+    m_cursorAtlas.cursorHeight = image.height() / ((Qt::LastCursor + cursorsPerRow) / cursorsPerRow);
     m_cursorAtlas.width = image.width();
     m_cursorAtlas.height = image.height();
     m_cursorAtlas.image = image;
@@ -270,10 +271,30 @@ bool QEGLPlatformCursor::setCurrentCursor(QCursor *cursor)
 }
 #endif
 
+void QEGLPlatformCursorUpdater::update(const QPoint &pos, const QRegion &rgn)
+{
+    m_active = false;
+    QWindowSystemInterface::handleExposeEvent(m_screen->topLevelAt(pos), rgn);
+    QWindowSystemInterface::flushWindowSystemEvents();
+}
+
+void QEGLPlatformCursorUpdater::scheduleUpdate(const QPoint &pos, const QRegion &rgn)
+{
+    if (m_active)
+        return;
+
+    m_active = true;
+
+    // Must not flush the window system events directly from here since we are likely to
+    // be a called directly from QGuiApplication's processMouseEvents. Flushing events
+    // could cause reentering by dispatching more queued mouse events.
+    QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection,
+                              Q_ARG(QPoint, pos), Q_ARG(QRegion, rgn));
+}
+
 void QEGLPlatformCursor::update(const QRegion &rgn)
 {
-    QWindowSystemInterface::handleExposeEvent(m_screen->topLevelAt(m_cursor.pos), rgn);
-    QWindowSystemInterface::flushWindowSystemEvents();
+    m_updater.scheduleUpdate(m_cursor.pos, rgn);
 }
 
 QRect QEGLPlatformCursor::cursorRect() const

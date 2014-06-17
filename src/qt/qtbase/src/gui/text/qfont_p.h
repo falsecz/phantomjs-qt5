@@ -55,6 +55,7 @@
 
 #include "QtGui/qfont.h"
 #include "QtCore/qmap.h"
+#include "QtCore/qhash.h"
 #include "QtCore/qobject.h"
 #include "QtCore/qstringlist.h"
 #include <QtGui/qfontdatabase.h>
@@ -132,6 +133,22 @@ struct QFontDef
         return false;
     }
 };
+
+inline uint qHash(const QFontDef &fd, uint seed = 0) Q_DECL_NOTHROW
+{
+    return qHash(qRound64(fd.pixelSize*10000)) // use only 4 fractional digits
+        ^  qHash(fd.weight)
+        ^  qHash(fd.style)
+        ^  qHash(fd.stretch)
+        ^  qHash(fd.styleHint)
+        ^  qHash(fd.styleStrategy)
+        ^  qHash(fd.ignorePitch)
+        ^  qHash(fd.fixedPitch)
+        ^  qHash(fd.family, seed)
+        ^  qHash(fd.styleName)
+        ^  qHash(fd.hintingPreference)
+        ;
+}
 
 class QFontEngineData
 {
@@ -211,22 +228,32 @@ public:
     void clear();
 
     struct Key {
-        Key() : script(0), screen(0) { }
-        Key(const QFontDef &d, int c, int s = 0)
-            : def(d), script(c), screen(s) { }
+        Key() : script(0), multi(0), screen(0) { }
+        Key(const QFontDef &d, uchar c, bool m = 0, uchar s = 0)
+            : def(d), script(c), multi(m), screen(s) { }
 
         QFontDef def;
-        int script;
-        int screen;
+        uchar script;
+        uchar multi: 1;
+        uchar screen: 7;
 
         inline bool operator<(const Key &other) const
         {
             if (script != other.script) return script < other.script;
             if (screen != other.screen) return screen < other.screen;
+            if (multi != other.multi) return multi < other.multi;
+            if (multi && def.fallBackFamilies.size() != other.def.fallBackFamilies.size())
+                return def.fallBackFamilies.size() < other.def.fallBackFamilies.size();
             return def < other.def;
         }
         inline bool operator==(const Key &other) const
-        { return def == other.def && script == other.script && screen == other.screen; }
+        {
+            return script == other.script
+                    && screen == other.screen
+                    && multi == other.multi
+                    && (!multi || def.fallBackFamilies == other.def.fallBackFamilies)
+                    && def == other.def;
+        }
     };
 
     // QFontEngineData cache

@@ -80,7 +80,9 @@ struct Q_CORE_EXPORT QArrayData
 
     enum AllocationOption {
         CapacityReserved    = 0x1,
+#if QT_SUPPORTS(UNSHARABLE_CONTAINERS)
         Unsharable          = 0x2,
+#endif
         RawData             = 0x4,
         Grow                = 0x8,
 
@@ -99,8 +101,10 @@ struct Q_CORE_EXPORT QArrayData
     AllocationOptions detachFlags() const
     {
         AllocationOptions result;
+#if QT_SUPPORTS(UNSHARABLE_CONTAINERS)
         if (!ref.isSharable())
             result |= Unsharable;
+#endif
         if (capacityReserved)
             result |= CapacityReserved;
         return result;
@@ -135,7 +139,7 @@ struct QTypedArrayData
     public:
         T *i;
         typedef std::random_access_iterator_tag  iterator_category;
-        typedef qptrdiff difference_type;
+        typedef int difference_type;
         typedef T value_type;
         typedef T *pointer;
         typedef T &reference;
@@ -169,7 +173,7 @@ struct QTypedArrayData
     public:
         const T *i;
         typedef std::random_access_iterator_tag  iterator_category;
-        typedef qptrdiff difference_type;
+        typedef int difference_type;
         typedef T value_type;
         typedef const T *pointer;
         typedef const T &reference;

@@ -144,6 +144,8 @@ void *QAccessiblePlainTextEdit::interface_cast(QAccessible::InterfaceType t)
 {
     if (t == QAccessible::TextInterface)
         return static_cast<QAccessibleTextInterface*>(this);
+    else if (t == QAccessible::EditableTextInterface)
+        return static_cast<QAccessibleEditableTextInterface*>(this);
     return QAccessibleWidget::interface_cast(t);
 }
 
@@ -268,6 +270,8 @@ void *QAccessibleTextEdit::interface_cast(QAccessible::InterfaceType t)
 {
     if (t == QAccessible::TextInterface)
         return static_cast<QAccessibleTextInterface*>(this);
+    else if (t == QAccessible::EditableTextInterface)
+        return static_cast<QAccessibleEditableTextInterface*>(this);
     return QAccessibleWidget::interface_cast(t);
 }
 
@@ -631,7 +635,7 @@ QDockWidget *QAccessibleDockWidget::dockWidget() const
 
 QString QAccessibleDockWidget::text(QAccessible::Text t) const
 {
-    if (t == QAccessible::Name || t == QAccessible::Value) {
+    if (t == QAccessible::Name) {
         return qt_accStripAmp(dockWidget()->windowTitle());
     }
     return QString();
@@ -830,7 +834,7 @@ QString QAccessibleTextWidget::text(int startOffset, int endOffset) const
     cursor.setPosition(startOffset, QTextCursor::MoveAnchor);
     cursor.setPosition(endOffset, QTextCursor::KeepAnchor);
 
-    return cursor.selectedText();
+    return cursor.selectedText().replace(QChar(QChar::ParagraphSeparator), QLatin1Char('\n'));
 }
 
 QPoint QAccessibleTextWidget::scrollBarPosition() const

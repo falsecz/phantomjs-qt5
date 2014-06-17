@@ -1,8 +1,7 @@
 TARGET     = QtGui
 QT = core-private
 
-MODULE_CONFIG = needs_qpa_plugin
-contains(QT_CONFIG, opengl.*):MODULE_CONFIG += opengl
+contains(QT_CONFIG, opengl.*): MODULE_CONFIG = opengl
 
 DEFINES   += QT_NO_USING_NAMESPACE
 
@@ -10,10 +9,14 @@ QMAKE_DOCS = $$PWD/doc/qtgui.qdocconf
 
 MODULE_PLUGIN_TYPES = \
     platforms \
+    platformthemes \
+    platforminputcontexts \
+    generic \
+    iconengines \
     imageformats
 
 # This is here only because the platform plugin is no module, obviously.
-win32:contains(QT_CONFIG, angle) {
+win32:contains(QT_CONFIG, angle)|contains(QT_CONFIG, dynamicgl) {
     MODULE_AUX_INCLUDES = \
         \$\$QT_MODULE_INCLUDE_BASE/QtANGLE
 }
@@ -30,7 +33,7 @@ testcocoon {
 
 mac:!ios: LIBS_PRIVATE += -framework Cocoa
 
-CONFIG += simd
+CONFIG += simd optimize_full
 
 include(accessible/accessible.pri)
 include(kernel/kernel.pri)
@@ -67,14 +70,7 @@ contains(QT_CONFIG, angle) {
         !isEmpty(QMAKE_LIBDIR_EGL): CMAKE_EGL_LIBDIR += $$cmakeTargetPath($$QMAKE_LIBDIR_EGL)
     }
 
-    contains(QT_CONFIG, opengles1) {
-        !isEmpty(QMAKE_INCDIR_OPENGL_ES1): CMAKE_GL_INCDIRS = $$cmakeTargetPaths($$QMAKE_INCDIR_OPENGL_ES1)
-        CMAKE_OPENGL_INCDIRS = $$cmakePortablePaths($$QMAKE_INCDIR_OPENGL_ES1)
-        CMAKE_OPENGL_LIBS = $$cmakeProcessLibs($$QMAKE_LIBS_OPENGL_ES1)
-        !isEmpty(QMAKE_LIBDIR_OPENGL_ES1): CMAKE_OPENGL_LIBDIR = $$cmakePortablePaths($$QMAKE_LIBDIR_OPENGL_ES1)
-        CMAKE_GL_HEADER_NAME = GLES/gl.h
-        CMAKE_QT_OPENGL_IMPLEMENTATION = GLES
-    } else:contains(QT_CONFIG, opengles2) {
+    contains(QT_CONFIG, opengles2) {
         !isEmpty(QMAKE_INCDIR_OPENGL_ES2): CMAKE_GL_INCDIRS = $$cmakeTargetPaths($$QMAKE_INCDIR_OPENGL_ES2)
         CMAKE_OPENGL_INCDIRS = $$cmakePortablePaths($$QMAKE_INCDIR_OPENGL_ES2)
         CMAKE_OPENGL_LIBS = $$cmakeProcessLibs($$QMAKE_LIBS_OPENGL_ES2)
@@ -84,7 +80,7 @@ contains(QT_CONFIG, angle) {
     } else:contains(QT_CONFIG, opengl) {
         !isEmpty(QMAKE_INCDIR_OPENGL): CMAKE_GL_INCDIRS = $$cmakeTargetPaths($$QMAKE_INCDIR_OPENGL)
         CMAKE_OPENGL_INCDIRS = $$cmakePortablePaths($$QMAKE_INCDIR_OPENGL)
-        CMAKE_OPENGL_LIBS = $$cmakeProcessLibs($$QMAKE_LIBS_OPENGL)
+        !contains(QT_CONFIG, dynamicgl): CMAKE_OPENGL_LIBS = $$cmakeProcessLibs($$QMAKE_LIBS_OPENGL)
         !isEmpty(QMAKE_LIBDIR_OPENGL): CMAKE_OPENGL_LIBDIR = $$cmakePortablePaths($$QMAKE_LIBDIR_OPENGL)
         CMAKE_GL_HEADER_NAME = GL/gl.h
         mac: CMAKE_GL_HEADER_NAME = gl.h

@@ -330,12 +330,25 @@ QWindowsContext::QWindowsContext() :
 
 QWindowsContext::~QWindowsContext()
 {
+#if !defined(QT_NO_TABLETEVENT) && !defined(Q_OS_WINCE)
+    d->m_tabletSupport.reset(); // Destroy internal window before unregistering classes.
+#endif
     unregisterWindowClasses();
     if (d->m_oleInitializeResult == S_OK || d->m_oleInitializeResult == S_FALSE)
         OleUninitialize();
 
     d->m_screenManager.clearScreens(); // Order: Potentially calls back to the windows.
     m_instance = 0;
+}
+
+void QWindowsContext::setTabletAbsoluteRange(int a)
+{
+#if !defined(QT_NO_TABLETEVENT) && !defined(Q_OS_WINCE)
+    if (!d->m_tabletSupport.isNull())
+        d->m_tabletSupport->setAbsoluteRange(a);
+#else
+    Q_UNUSED(a)
+#endif
 }
 
 QWindowsContext *QWindowsContext::instance()
@@ -517,8 +530,10 @@ void QWindowsContext::unregisterWindowClasses()
 {
     const HINSTANCE appInstance = (HINSTANCE)GetModuleHandle(0);
 
-    foreach (const QString &name,  d->m_registeredWindowClassNames)
-        UnregisterClass((wchar_t*)name.utf16(), appInstance);
+    foreach (const QString &name,  d->m_registeredWindowClassNames) {
+        if (!UnregisterClass((wchar_t*)name.utf16(), appInstance) && QWindowsContext::verbose)
+            qErrnoWarning("UnregisterClass failed for '%s'", qPrintable(name));
+    }
     d->m_registeredWindowClassNames.clear();
 }
 
@@ -956,8 +971,10 @@ bool QWindowsContext::windowsProc(HWND hwnd, UINT message,
 #if !defined(Q_OS_WINCE) && !defined(QT_NO_SESSIONMANAGER)
     case QtWindows::QueryEndSessionApplicationEvent: {
         QWindowsSessionManager *sessionManager = platformSessionManager();
-        if (sessionManager->isActive()) // bogus message from windows
+        if (sessionManager->isActive()) { // bogus message from windows
+            *result = sessionManager->wasCanceled() ? 0 : 1;
             return true;
+        }
 
         sessionManager->setActive(true);
         sessionManager->blocksInteraction();

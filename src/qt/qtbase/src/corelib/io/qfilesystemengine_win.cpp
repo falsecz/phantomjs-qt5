@@ -74,6 +74,8 @@
 #  define SECURITY_WIN32
 #  include <security.h>
 #else // !Q_OS_WINRT
+#  include "qstandardpaths.h"
+#  include "qthreadstorage.h"
 #  include <wrl.h>
 #  include <windows.foundation.h>
 #  include <windows.storage.h>
@@ -604,7 +606,7 @@ QFileSystemEntry QFileSystemEngine::absoluteName(const QFileSystemEntry &entry)
 // FILE_INFO_BY_HANDLE_CLASS has been extended by FileIdInfo = 18 as of VS2012.
 typedef enum { Q_FileIdInfo = 18 } Q_FILE_INFO_BY_HANDLE_CLASS;
 
-#  if defined(Q_CC_MINGW) || (defined(Q_CC_MSVC) && _MSC_VER < 1700)
+#  if defined(Q_CC_MINGW) || (defined(Q_CC_MSVC) && (_MSC_VER < 1700 || WINVER <= 0x0601))
 
 // MinGW-64 defines FILE_ID_128 as of gcc-4.8.1 along with FILE_SUPPORTS_INTEGRITY_STREAMS
 #    if !(defined(Q_CC_MINGW) && defined(FILE_SUPPORTS_INTEGRITY_STREAMS))
@@ -617,7 +619,7 @@ typedef struct _FILE_ID_INFO {
     ULONGLONG VolumeSerialNumber;
     FILE_ID_128 FileId;
 } FILE_ID_INFO, *PFILE_ID_INFO;
-#  endif // if defined (Q_CC_MINGW) || (defined(Q_CC_MSVC) && _MSC_VER < 1700))
+#  endif // if defined (Q_CC_MINGW) || (defined(Q_CC_MSVC) && (_MSC_VER < 1700 || WINVER <= 0x0601))
 
 // File ID for Windows up to version 7.
 static inline QByteArray fileId(HANDLE handle)
@@ -1151,6 +1153,18 @@ bool QFileSystemEngine::createDirectory(const QFileSystemEntry &entry, bool crea
                         bool existed = false;
                         if (isDirPath(chunk, &existed) && existed)
                             continue;
+#ifdef Q_OS_WINRT
+                        static QThreadStorage<QString> dataLocation;
+                        if (!dataLocation.hasLocalData())
+                            dataLocation.setLocalData(QDir::toNativeSeparators(QStandardPaths::writableLocation(QStandardPaths::DataLocation)));
+                        static QThreadStorage<QString> tempLocation;
+                        if (!tempLocation.hasLocalData())
+                            tempLocation.setLocalData(QDir::toNativeSeparators(QStandardPaths::writableLocation(QStandardPaths::TempLocation)));
+                        // We try to create something outside the sandbox, which is forbidden
+                        // However we could still try to pass into the sandbox
+                        if (dataLocation.localData().startsWith(chunk) || tempLocation.localData().startsWith(chunk))
+                            continue;
+#endif
                     }
                     return false;
                 }

@@ -63,6 +63,7 @@
 #include <qt_windows.h>
 
 #ifdef Q_OS_WINRT
+#include <qelapsedtimer.h>
 #include <thread>
 #endif
 
@@ -504,22 +505,22 @@ void QThread::usleep(unsigned long usecs)
 
 void QThread::yieldCurrentThread()
 {
-    std::this_thread::yield();
+    msleep(1);
 }
 
 void QThread::sleep(unsigned long secs)
 {
-    std::this_thread::sleep_for(std::chrono::seconds(secs));
+    msleep(secs * 1000);
 }
 
 void QThread::msleep(unsigned long msecs)
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
+    WaitForSingleObjectEx(GetCurrentThread(), msecs, FALSE);
 }
 
 void QThread::usleep(unsigned long usecs)
 {
-    std::this_thread::sleep_for(std::chrono::microseconds(usecs));
+    msleep((usecs / 1000) + 1);
 }
 #endif // Q_OS_WINRT
 
@@ -680,21 +681,11 @@ bool QThread::wait(unsigned long time)
         break;
     }
 #else // !Q_OS_WINRT
-    if (d->handle->joinable()) {
-        HANDLE handle = d->handle->native_handle();
-        switch (WaitForSingleObjectEx(handle, time, FALSE)) {
-        case WAIT_OBJECT_0:
-            ret = true;
-            d->handle->join();
-            break;
-        case WAIT_FAILED:
-            qErrnoWarning("QThread::wait: WaitForSingleObjectEx() failed");
-            break;
-        case WAIT_ABANDONED:
-        case WAIT_TIMEOUT:
-        default:
-            break;
-        }
+    if (!d->finished) {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < time && !d->finished)
+            yieldCurrentThread();
     }
 #endif // Q_OS_WINRT
 

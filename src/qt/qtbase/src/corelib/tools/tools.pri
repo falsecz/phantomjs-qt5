@@ -1,5 +1,7 @@
 # Qt tools module
 
+intel_icc: QMAKE_CXXFLAGS += -fp-model strict
+
 HEADERS +=  \
         tools/qalgorithms.h \
         tools/qarraydata.h \
@@ -123,7 +125,8 @@ false: SOURCES += $$NO_PCH_SOURCES # Hack for QtCreator
     SOURCES += tools/qelapsedtimer_mac.cpp
     OBJECTIVE_SOURCES += tools/qlocale_mac.mm \
                          tools/qtimezoneprivate_mac.mm \
-                         tools/qstring_mac.mm
+                         tools/qstring_mac.mm \
+                         tools/qbytearray_mac.mm
 }
 else:blackberry {
     SOURCES += tools/qelapsedtimer_unix.cpp tools/qlocale_blackberry.cpp tools/qtimezoneprivate_tz.cpp

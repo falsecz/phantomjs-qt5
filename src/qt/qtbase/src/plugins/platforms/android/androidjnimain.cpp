@@ -63,7 +63,6 @@
 #include "androidjnimenu.h"
 #include "qandroidplatformdialoghelpers.h"
 #include "qandroidplatformintegration.h"
-#include <QtWidgets/QApplication>
 
 #include <qabstracteventdispatcher.h>
 
@@ -71,6 +70,7 @@
 #include <android/asset_manager_jni.h>
 #include "qandroidassetsfileenginehandler.h"
 #include <android/api-level.h>
+#include <QtCore/private/qjnihelpers_p.h>
 
 #include <qpa/qwindowsysteminterface.h>
 
@@ -84,6 +84,7 @@ static AAssetManager *m_assetManager = NULL;
 static jobject m_resourcesObj;
 static jobject m_activityObject = NULL;
 static jmethodID m_createSurfaceMethodID = 0;
+static jmethodID m_insertNativeViewMethodID = 0;
 static jmethodID m_setSurfaceGeometryMethodID = 0;
 static jmethodID m_destroySurfaceMethodID = 0;
 
@@ -333,11 +334,11 @@ namespace QtAndroid
         return manufacturer + QStringLiteral(" ") + model;
     }
 
-    int createSurface(AndroidSurfaceClient *client, const QRect &geometry, bool onTop)
+    int createSurface(AndroidSurfaceClient *client, const QRect &geometry, bool onTop, int imageDepth)
     {
         QJNIEnvironmentPrivate env;
         if (!env)
-            return 0;
+            return -1;
 
         m_surfacesMutex.lock();
         int surfaceId = m_surfaceId++;
@@ -355,7 +356,35 @@ namespace QtAndroid
                                      m_createSurfaceMethodID,
                                      surfaceId,
                                      jboolean(onTop),
-                                     x, y, w, h);
+                                     x, y, w, h,
+                                     imageDepth);
+        return surfaceId;
+    }
+
+    int insertNativeView(jobject view, const QRect &geometry)
+    {
+        QJNIEnvironmentPrivate env;
+        if (!env)
+            return 0;
+
+        m_surfacesMutex.lock();
+        const int surfaceId = m_surfaceId++;
+        m_surfacesMutex.unlock();
+
+        jint x = 0, y = 0, w = -1, h = -1;
+        if (!geometry.isNull()) {
+            x = geometry.x();
+            y = geometry.y();
+            w = std::max(geometry.width(), 1);
+            h = std::max(geometry.height(), 1);
+        }
+
+        env->CallStaticVoidMethod(m_applicationClass,
+                                  m_insertNativeViewMethodID,
+                                  surfaceId,
+                                  view,
+                                  x, y, w, h);
+
         return surfaceId;
     }
 
@@ -547,7 +576,8 @@ static void updateWindow(JNIEnv */*env*/, jobject /*thiz*/)
     }
 
     QAndroidPlatformScreen *screen = static_cast<QAndroidPlatformScreen *>(m_androidPlatformIntegration->screen());
-    QMetaObject::invokeMethod(screen, "setDirty", Qt::QueuedConnection, Q_ARG(QRect,screen->geometry()));
+    if (screen->rasterSurfaces())
+        QMetaObject::invokeMethod(screen, "setDirty", Qt::QueuedConnection, Q_ARG(QRect,screen->geometry()));
 }
 
 static void updateApplicationState(JNIEnv */*env*/, jobject /*thiz*/, jint state)
@@ -593,6 +623,14 @@ static void handleOrientationChanged(JNIEnv */*env*/, jobject /*thiz*/, jint new
     }
 }
 
+static void onActivityResult(JNIEnv */*env*/, jclass /*cls*/,
+                             jint requestCode,
+                             jint resultCode,
+                             jobject data)
+{
+    QtAndroidPrivate::handleActivityResult(requestCode, resultCode, data);
+}
+
 static JNINativeMethod methods[] = {
     {"startQtAndroidPlugin", "()Z", (void *)startQtAndroidPlugin},
     {"startQtApplication", "(Ljava/lang/String;Ljava/lang/String;)V", (void *)startQtApplication},
@@ -602,7 +640,8 @@ static JNINativeMethod methods[] = {
     {"setSurface", "(ILjava/lang/Object;II)V", (void *)setSurface},
     {"updateWindow", "()V", (void *)updateWindow},
     {"updateApplicationState", "(I)V", (void *)updateApplicationState},
-    {"handleOrientationChanged", "(II)V", (void *)handleOrientationChanged}
+    {"handleOrientationChanged", "(II)V", (void *)handleOrientationChanged},
+    {"onActivityResult", "(IILandroid/content/Intent;)V", (void *)onActivityResult}
 };
 
 #define FIND_AND_CHECK_CLASS(CLASS_NAME) \
@@ -652,7 +691,8 @@ static int registerNatives(JNIEnv *env)
         return JNI_FALSE;
     }
 
-    GET_AND_CHECK_STATIC_METHOD(m_createSurfaceMethodID, m_applicationClass, "createSurface", "(IZIIII)V");
+    GET_AND_CHECK_STATIC_METHOD(m_createSurfaceMethodID, m_applicationClass, "createSurface", "(IZIIIII)V");
+    GET_AND_CHECK_STATIC_METHOD(m_insertNativeViewMethodID, m_applicationClass, "insertNativeView", "(ILandroid/view/View;IIII)V");
     GET_AND_CHECK_STATIC_METHOD(m_setSurfaceGeometryMethodID, m_applicationClass, "setSurfaceGeometry", "(IIIII)V");
     GET_AND_CHECK_STATIC_METHOD(m_destroySurfaceMethodID, m_applicationClass, "destroySurface", "(I)V");
 

@@ -39,10 +39,11 @@
 **
 ****************************************************************************/
 
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QStyle>
 #include "qandroidplatformdialoghelpers.h"
 #include "androidjnimain.h"
+
+#include <QTextDocument>
+
 #include <private/qguiapplication_p.h>
 #include <qpa/qplatformtheme.h>
 
@@ -63,6 +64,14 @@ void QAndroidPlatformMessageDialogHelper::exec()
     m_loop.exec();
 }
 
+static QString htmlText(QString text)
+{
+    if (Qt::mightBeRichText(text))
+        return text;
+    text.remove(QLatin1Char('\r'));
+    return text.toHtmlEscaped().replace(QLatin1Char('\n'), QLatin1String("<br />"));
+}
+
 bool QAndroidPlatformMessageDialogHelper::show(Qt::WindowFlags windowFlags
                                          , Qt::WindowModality windowModality
                                          , QWindow *parent)
@@ -76,23 +85,23 @@ bool QAndroidPlatformMessageDialogHelper::show(Qt::WindowFlags windowFlags
 
     m_javaMessageDialog.callMethod<void>("setIcon", "(I)V", opt->icon());
 
-    QString str = opt->windowTitle();
+    QString str = htmlText(opt->windowTitle());
     if (!str.isEmpty())
         m_javaMessageDialog.callMethod<void>("setTile", "(Ljava/lang/String;)V", QJNIObjectPrivate::fromString(str).object());
 
-    str = opt->text();
+    str = htmlText(opt->text());
     if (!str.isEmpty())
         m_javaMessageDialog.callMethod<void>("setText", "(Ljava/lang/String;)V", QJNIObjectPrivate::fromString(str).object());
 
-    str = opt->informativeText();
+    str = htmlText(opt->informativeText());
     if (!str.isEmpty())
         m_javaMessageDialog.callMethod<void>("setInformativeText", "(Ljava/lang/String;)V", QJNIObjectPrivate::fromString(str).object());
 
-    str = opt->detailedText();
+    str = htmlText(opt->detailedText());
     if (!str.isEmpty())
         m_javaMessageDialog.callMethod<void>("setDetailedText", "(Ljava/lang/String;)V", QJNIObjectPrivate::fromString(str).object());
 
-    for (int i = QMessageDialogOptions::FirstButton; i < QMessageDialogOptions::LastButton; i<<=1) {
+    for (int i = QPlatformDialogHelper::FirstButton; i < QPlatformDialogHelper::LastButton; i<<=1) {
         if ( opt->standardButtons() & i ) {
             const QString text = QGuiApplicationPrivate::platformTheme()->standardButtonText(i);
             m_javaMessageDialog.callMethod<void>("addButton", "(ILjava/lang/String;)V", i, QJNIObjectPrivate::fromString(text).object());
@@ -120,8 +129,8 @@ void QAndroidPlatformMessageDialogHelper::dialogResult(int buttonID)
         return;
     }
 
-    QMessageDialogOptions::StandardButton standardButton = static_cast<QMessageDialogOptions::StandardButton>(buttonID);
-    QMessageDialogOptions::ButtonRole role = QMessageDialogOptions::buttonRole(standardButton);
+    QPlatformDialogHelper::StandardButton standardButton = static_cast<QPlatformDialogHelper::StandardButton>(buttonID);
+    QPlatformDialogHelper::ButtonRole role = QPlatformDialogHelper::buttonRole(standardButton);
     emit clicked(standardButton, role);
 }
 

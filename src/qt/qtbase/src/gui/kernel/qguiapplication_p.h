@@ -92,6 +92,7 @@ public:
     virtual bool shouldQuit();
 
     bool shouldQuitInternal(const QWindowList &processedWindows);
+    virtual bool tryCloseAllWindows();
 
     static Qt::KeyboardModifiers modifier_buttons;
     static Qt::MouseButtons mouse_buttons;
@@ -187,6 +188,7 @@ public:
 
     static QGuiApplicationPrivate *instance() { return self; }
 
+    static QIcon *app_icon;
     static QString *platform_name;
     static QString *displayName;
 
@@ -230,6 +232,8 @@ public:
     static bool obey_desktop_settings;
     static bool noGrab;
     QInputMethod *inputMethod;
+
+    QString firstWindowTitle;
 
     static QList<QObject *> generic_plugin_list;
 #ifndef QT_NO_SHORTCUT
@@ -280,12 +284,15 @@ public:
     // hook reimplemented in QApplication to apply the QStyle function on the QIcon
     virtual QPixmap applyQIconStyleHelper(QIcon::Mode, const QPixmap &basePixmap) const { return basePixmap; }
 
+    virtual void notifyWindowIconChanged();
+
     static QRect applyWindowGeometrySpecification(const QRect &windowGeometry, const QWindow *window);
 
     static void setApplicationState(Qt::ApplicationState state);
 
 protected:
     virtual void notifyThemeChanged();
+    bool tryCloseRemainingWindows(QWindowList processedWindows);
 #ifndef QT_NO_DRAGANDDROP
     virtual void notifyDragStarted(const QDrag *);
 #endif // QT_NO_DRAGANDDROP

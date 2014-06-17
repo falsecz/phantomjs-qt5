@@ -48,8 +48,9 @@
 #  include "qwindowscursor.h"
 #endif
 
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
 #  include "qwindowseglcontext.h"
+#  include <QtGui/QOpenGLFunctions>
 #endif
 
 #include <QtGui/QGuiApplication>
@@ -861,7 +862,7 @@ QWindowsWindow::QWindowsWindow(QWindow *aWindow, const QWindowsWindowData &data)
     m_dropTarget(0),
     m_savedStyle(0),
     m_format(aWindow->format()),
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
     m_eglSurface(0),
 #endif
 #ifdef Q_OS_WINCE
@@ -878,8 +879,9 @@ QWindowsWindow::QWindowsWindow(QWindow *aWindow, const QWindowsWindowData &data)
         return; // No further handling for Qt::Desktop
     if (aWindow->surfaceType() == QWindow::OpenGLSurface) {
         setFlag(OpenGLSurface);
-#ifdef QT_OPENGL_ES_2
-        setFlag(OpenGL_ES2);
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
+        if (QOpenGLContext::openGLModuleType() != QOpenGLContext::LibGL)
+            setFlag(OpenGL_ES2);
 #endif
     }
     updateDropSite();
@@ -922,18 +924,30 @@ void QWindowsWindow::fireExpose(const QRegion &region, bool force)
     QWindowSystemInterface::handleExposeEvent(window(), region);
 }
 
+static inline QWindow *findTransientChild(const QWindow *parent)
+{
+    foreach (QWindow *w, QGuiApplication::topLevelWindows())
+        if (w->transientParent() == parent)
+            return w;
+    return 0;
+}
+
 void QWindowsWindow::destroyWindow()
 {
     qCDebug(lcQpaWindows) << __FUNCTION__ << this << window() << m_data.hwnd;
     if (m_data.hwnd) { // Stop event dispatching before Window is destroyed.
         setFlag(WithinDestroy);
+        // Clear any transient child relationships as Windows will otherwise destroy them (QTBUG-35499, QTBUG-36666)
+        if (QWindow *transientChild = findTransientChild(window()))
+            if (QWindowsWindow *tw = QWindowsWindow::baseWindowOf(transientChild))
+                tw->updateTransientParent();
         QWindowsContext *context = QWindowsContext::instance();
         if (context->windowUnderMouse() == window())
             context->clearWindowUnderMouse();
         if (hasMouseCapture())
             setMouseGrabEnabled(false);
         setDropSiteEnabled(false);
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
         if (m_eglSurface) {
             qCDebug(lcQpaGl) << __FUNCTION__ << "Freeing EGL surface " << m_eglSurface << window();
             eglDestroySurface(m_staticEglContext->display(), m_eglSurface);
@@ -1063,7 +1077,7 @@ bool QWindowsWindow::isVisible() const
 bool QWindowsWindow::isActive() const
 {
     // Check for native windows or children of the active native window.
-    if (const HWND activeHwnd = GetActiveWindow())
+    if (const HWND activeHwnd = GetForegroundWindow())
         if (m_data.hwnd == activeHwnd || IsChild(activeHwnd, m_data.hwnd))
             return true;
     return false;
@@ -1100,6 +1114,18 @@ QPoint QWindowsWindow::mapFromGlobal(const QPoint &pos) const
         return pos;
 }
 
+#ifndef Q_OS_WINCE
+static inline HWND transientParentHwnd(HWND hwnd)
+{
+    if (GetAncestor(hwnd, GA_PARENT) == GetDesktopWindow()) {
+        const HWND rootOwnerHwnd = GetAncestor(hwnd, GA_ROOTOWNER);
+        if (rootOwnerHwnd != hwnd) // May return itself for toplevels.
+            return rootOwnerHwnd;
+    }
+    return 0;
+}
+#endif // !Q_OS_WINCE
+
 // Update the transient parent for a toplevel window. The concept does not
 // really exist on Windows, the relationship is set by passing a parent along with !WS_CHILD
 // to window creation or by setting the parent using  GWL_HWNDPARENT (as opposed to
@@ -1110,12 +1136,13 @@ void QWindowsWindow::updateTransientParent() const
     if (window()->type() == Qt::Popup)
         return; // QTBUG-34503, // a popup stays on top, no parent, see also WindowCreationData::fromWindow().
     // Update transient parent.
-    const HWND oldTransientParent =
-        GetAncestor(m_data.hwnd, GA_PARENT) == GetDesktopWindow() ? GetAncestor(m_data.hwnd, GA_ROOTOWNER) : HWND(0);
+    const HWND oldTransientParent = transientParentHwnd(m_data.hwnd);
     HWND newTransientParent = 0;
     if (const QWindow *tp = window()->transientParent())
-        newTransientParent = QWindowsWindow::handleOf(tp);
-    if (newTransientParent && newTransientParent != oldTransientParent)
+        if (const QWindowsWindow *tw = QWindowsWindow::baseWindowOf(tp))
+            if (!tw->testFlag(WithinDestroy)) // Prevent destruction by parent window (QTBUG-35499, QTBUG-36666)
+                newTransientParent = tw->handle();
+    if (newTransientParent != oldTransientParent)
         SetWindowLongPtr(m_data.hwnd, GWL_HWNDPARENT, (LONG_PTR)newTransientParent);
 #endif // !Q_OS_WINCE
 }
@@ -1332,9 +1359,10 @@ void QWindowsWindow::handleResized(int wParam)
         handleGeometryChange();
         break;
     case SIZE_RESTORED:
-        bool fullScreen = isFullScreen_sys();
-        if ((m_windowState != Qt::WindowNoState) || fullScreen)
-            handleWindowStateChange(fullScreen ? Qt::WindowFullScreen : Qt::WindowNoState);
+        if (isFullScreen_sys())
+            handleWindowStateChange(Qt::WindowFullScreen);
+        else if (m_windowState != Qt::WindowNoState && !testFlag(MaximizeToFullScreen))
+            handleWindowStateChange(Qt::WindowNoState);
         handleGeometryChange();
         break;
     }
@@ -1590,8 +1618,11 @@ void QWindowsWindow::setWindowState_sys(Qt::WindowState newState)
     if ((oldState == Qt::WindowMaximized) != (newState == Qt::WindowMaximized)) {
         if (visible && !(newState == Qt::WindowMinimized)) {
             setFlag(WithinMaximize);
+            if (newState == Qt::WindowFullScreen)
+                setFlag(MaximizeToFullScreen);
             ShowWindow(m_data.hwnd, (newState == Qt::WindowMaximized) ? SW_MAXIMIZE : SW_SHOWNOACTIVATE);
             clearFlag(WithinMaximize);
+            clearFlag(MaximizeToFullScreen);
         }
     }
 
@@ -2107,7 +2138,7 @@ void QWindowsWindow::setEnabled(bool enabled)
         setStyle(newStyle);
 }
 
-#ifdef QT_OPENGL_ES_2
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
 EGLSurface QWindowsWindow::ensureEglSurfaceHandle(const QWindowsWindow::QWindowsEGLStaticContextPtr &staticContext, EGLConfig config)
 {
     if (!m_eglSurface) {

@@ -66,7 +66,11 @@ Q_OBJECT
 public:
     // copied from, and must stay in sync with, QAction menu roles.
     enum MenuRole { NoRole = 0, TextHeuristicRole, ApplicationSpecificRole, AboutQtRole,
-                    AboutRole, PreferencesRole, QuitRole };
+                    AboutRole, PreferencesRole, QuitRole,
+                    // However these roles are private, perhaps temporarily.
+                    // They could be added as public QAction roles if necessary.
+                    CutRole, CopyRole, PasteRole, SelectAllRole,
+                    RoleCount };
 
     virtual void setTag(quintptr tag) = 0;
     virtual quintptr tag()const = 0;
@@ -116,6 +120,8 @@ public:
 
     virtual QPlatformMenuItem *menuItemAt(int position) const = 0;
     virtual QPlatformMenuItem *menuItemForTag(quintptr tag) const = 0;
+
+    virtual QPlatformMenuItem *createMenuItem() const;
 Q_SIGNALS:
     void aboutToShow();
     void aboutToHide();

@@ -137,6 +137,8 @@ QAccessible::State QAccessibleButton::state() const
 
     QAbstractButton *b = button();
     QCheckBox *cb = qobject_cast<QCheckBox *>(b);
+    if (b->isCheckable())
+        state.checkable = true;
     if (b->isChecked())
         state.checked = true;
     else if (cb && cb->checkState() == Qt::PartiallyChecked)
@@ -507,8 +509,10 @@ QString QAccessibleGroupBox::text(QAccessible::Text t) const
         switch (t) {
         case QAccessible::Name:
             txt = qt_accStripAmp(groupBox()->title());
+            break;
         case QAccessible::Description:
-            txt = qt_accStripAmp(groupBox()->title());
+            txt = qt_accStripAmp(groupBox()->toolTip());
+            break;
         default:
             break;
         }

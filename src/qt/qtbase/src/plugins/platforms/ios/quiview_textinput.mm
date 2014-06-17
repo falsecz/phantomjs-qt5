@@ -473,6 +473,8 @@ Q_GLOBAL_STATIC(StaticVariables, staticVariables);
     QCoreApplication::sendEvent(focusObject, &e);
     QFont qfont = qvariant_cast<QFont>(e.value(Qt::ImFont));
     UIFont *uifont = [UIFont fontWithName:qfont.family().toNSString() size:qfont.pointSize()];
+    if (!uifont)
+        return [NSDictionary dictionary];
     return [NSDictionary dictionaryWithObject:uifont forKey:UITextInputTextFontKey];
 }
 
@@ -492,8 +494,17 @@ Q_GLOBAL_STATIC(StaticVariables, staticVariables);
     if (!focusObject)
         return;
 
-    if ([text isEqualToString:@"\n"] && self.returnKeyType == UIReturnKeyDone)
-        [self resignFirstResponder];
+    if ([text isEqualToString:@"\n"]) {
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QKeyEvent release(QEvent::KeyRelease, Qt::Key_Return, Qt::NoModifier);
+        [self sendEventToFocusObject:press];
+        [self sendEventToFocusObject:release];
+
+        if (self.returnKeyType == UIReturnKeyDone)
+            [self resignFirstResponder];
+
+        return;
+    }
 
     QInputMethodEvent e;
     e.setCommitString(QString::fromNSString(text));

@@ -43,12 +43,20 @@
 #include "qwindowsintegration.h"
 #include "qwindowswindow.h"
 #include "qwindowscontext.h"
-#if defined(QT_OPENGL_ES_2)
+
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
 #  include "qwindowseglcontext.h"
 #  include <QtGui/QOpenGLContext>
-#elif !defined(QT_NO_OPENGL)
+#endif
+
+#if !defined(QT_NO_OPENGL) && !defined(QT_OPENGL_ES_2)
 #  include "qwindowsglcontext.h"
 #endif
+
+#if !defined(QT_NO_OPENGL)
+#  include <QtGui/QOpenGLFunctions>
+#endif
+
 #include "qwindowsscreen.h"
 #include "qwindowstheme.h"
 #include "qwindowsservices.h"
@@ -75,6 +83,7 @@
 #  include "qwindowssessionmanager.h"
 #endif
 #include <QtGui/private/qguiapplication_p.h>
+#include <QtGui/qpa/qplatforminputcontextfactory_p.h>
 
 #include <QtCore/private/qeventdispatcher_win_p.h>
 #include <QtCore/QDebug>
@@ -125,16 +134,17 @@ QT_BEGIN_NAMESPACE
 
 struct QWindowsIntegrationPrivate
 {
-#if defined(QT_OPENGL_ES_2)
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
     typedef QSharedPointer<QWindowsEGLStaticContext> QEGLStaticContextPtr;
-#elif !defined(QT_NO_OPENGL)
+#endif
+#if !defined(QT_NO_OPENGL) && !defined(QT_OPENGL_ES_2)
     typedef QSharedPointer<QOpenGLStaticContext> QOpenGLStaticContextPtr;
 #endif
 
     explicit QWindowsIntegrationPrivate(const QStringList &paramList);
     ~QWindowsIntegrationPrivate();
 
-    const unsigned m_options;
+    unsigned m_options;
     QWindowsContext m_context;
     QPlatformFontDatabase *m_fontDatabase;
 #ifndef QT_NO_CLIPBOARD
@@ -143,19 +153,21 @@ struct QWindowsIntegrationPrivate
     QWindowsDrag m_drag;
 #  endif
 #endif
-#if defined(QT_OPENGL_ES_2)
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
     QEGLStaticContextPtr m_staticEGLContext;
-#elif !defined(QT_NO_OPENGL)
+#endif
+#if !defined(QT_NO_OPENGL) && !defined(QT_OPENGL_ES_2)
     QOpenGLStaticContextPtr m_staticOpenGLContext;
 #endif
-    QWindowsInputContext m_inputContext;
+    QScopedPointer<QPlatformInputContext> m_inputContext;
 #ifndef QT_NO_ACCESSIBILITY
     QWindowsAccessibility m_accessibility;
 #endif
     QWindowsServices m_services;
 };
 
-static inline unsigned parseOptions(const QStringList &paramList)
+static inline unsigned parseOptions(const QStringList &paramList,
+                                    int *tabletAbsoluteRange)
 {
     unsigned options = 0;
     foreach (const QString &param, paramList) {
@@ -177,15 +189,21 @@ static inline unsigned parseOptions(const QStringList &paramList)
             options |= QWindowsIntegration::DontPassOsMouseEventsSynthesizedFromTouch;
         } else if (param.startsWith(QLatin1String("verbose="))) {
             QWindowsContext::verbose = param.right(param.size() - 8).toInt();
+        } else if (param.startsWith(QLatin1String("tabletabsoluterange="))) {
+            *tabletAbsoluteRange = param.rightRef(param.size() - 20).toInt();
         }
     }
     return options;
 }
 
 QWindowsIntegrationPrivate::QWindowsIntegrationPrivate(const QStringList &paramList)
-    : m_options(parseOptions(paramList))
+    : m_options(0)
     , m_fontDatabase(0)
 {
+    int tabletAbsoluteRange = -1;
+    m_options = parseOptions(paramList, &tabletAbsoluteRange);
+    if (tabletAbsoluteRange >= 0)
+        m_context.setTabletAbsoluteRange(tabletAbsoluteRange);
 }
 
 QWindowsIntegrationPrivate::~QWindowsIntegrationPrivate()
@@ -207,6 +225,14 @@ QWindowsIntegration::~QWindowsIntegration()
 {
 }
 
+void QWindowsIntegration::initialize()
+{
+    if (QPlatformInputContext *pluginContext = QPlatformInputContextFactory::create())
+        d->m_inputContext.reset(pluginContext);
+    else
+        d->m_inputContext.reset(new QWindowsInputContext);
+}
+
 bool QWindowsIntegration::hasCapability(QPlatformIntegration::Capability cap) const
 {
     switch (cap) {
@@ -216,8 +242,9 @@ bool QWindowsIntegration::hasCapability(QPlatformIntegration::Capability cap) co
     case OpenGL:
         return true;
     case ThreadedOpenGL:
-#  ifdef QT_OPENGL_ES_2
-        return QWindowsEGLContext::hasThreadedOpenGLCapability();
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
+        return QOpenGLContext::openGLModuleType() != QOpenGLContext::LibGL
+            ? QWindowsEGLContext::hasThreadedOpenGLCapability() : true;
 #  else
         return true;
 #  endif // QT_OPENGL_ES_2
@@ -227,6 +254,8 @@ bool QWindowsIntegration::hasCapability(QPlatformIntegration::Capability cap) co
     case MultipleWindows:
         return true;
     case ForeignWindows:
+        return true;
+    case RasterGLSurface:
         return true;
     default:
         return QPlatformIntegration::hasCapability(cap);
@@ -278,23 +307,27 @@ QPlatformOpenGLContext
     *QWindowsIntegration::createPlatformOpenGLContext(QOpenGLContext *context) const
 {
     qCDebug(lcQpaGl) << __FUNCTION__ << context->format();
-#ifdef QT_OPENGL_ES_2
-    if (d->m_staticEGLContext.isNull()) {
-        QWindowsEGLStaticContext *staticContext = QWindowsEGLStaticContext::create();
-        if (!staticContext)
-            return 0;
-        d->m_staticEGLContext = QSharedPointer<QWindowsEGLStaticContext>(staticContext);
+#if defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC)
+    if (QOpenGLContext::openGLModuleType() != QOpenGLContext::LibGL) {
+        if (d->m_staticEGLContext.isNull()) {
+            QWindowsEGLStaticContext *staticContext = QWindowsEGLStaticContext::create();
+            if (!staticContext)
+                return 0;
+            d->m_staticEGLContext = QSharedPointer<QWindowsEGLStaticContext>(staticContext);
+        }
+        return new QWindowsEGLContext(d->m_staticEGLContext, context->format(), context->shareHandle());
     }
-    return new QWindowsEGLContext(d->m_staticEGLContext, context->format(), context->shareHandle());
-#else  // QT_OPENGL_ES_2
-    if (d->m_staticOpenGLContext.isNull())
-        d->m_staticOpenGLContext =
-            QSharedPointer<QOpenGLStaticContext>(QOpenGLStaticContext::create());
-    QScopedPointer<QWindowsGLContext> result(new QWindowsGLContext(d->m_staticOpenGLContext, context));
-    if (result->isValid())
-        return result.take();
-    return 0;
+#endif
+#if !defined(QT_OPENGL_ES_2)
+    if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGL) {
+        if (d->m_staticOpenGLContext.isNull())
+            d->m_staticOpenGLContext =
+                QSharedPointer<QOpenGLStaticContext>(QOpenGLStaticContext::create());
+        QScopedPointer<QWindowsGLContext> result(new QWindowsGLContext(d->m_staticOpenGLContext, context));
+        return result->isValid() ? result.take() : 0;
+    }
 #endif // !QT_OPENGL_ES_2
+    return 0;
 }
 #endif // !QT_NO_OPENGL
 
@@ -358,7 +391,7 @@ QVariant QWindowsIntegration::styleHint(QPlatformIntegration::StyleHint hint) co
     switch (hint) {
     case QPlatformIntegration::CursorFlashTime:
         if (const unsigned timeMS = GetCaretBlinkTime())
-            return QVariant(int(timeMS));
+            return QVariant(int(timeMS) * 2);
         break;
 #ifdef SPI_GETKEYBOARDSPEED
     case KeyboardAutoRepeatRate:
@@ -417,7 +450,7 @@ QPlatformDrag *QWindowsIntegration::drag() const
 
 QPlatformInputContext * QWindowsIntegration::inputContext() const
 {
-    return &d->m_inputContext;
+    return d->m_inputContext.data();
 }
 
 #ifndef QT_NO_ACCESSIBILITY

@@ -81,18 +81,53 @@ typedef ITypedEventHandler<Core::CoreApplicationView *, Activation::IActivatedEv
 
 static int g_mainExitCode;
 
+static QtMessageHandler defaultMessageHandler;
+static void devMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &message)
+{
+#ifndef Q_OS_WINPHONE
+    static HANDLE shmem = 0;
+    static HANDLE event = 0;
+    if (!shmem)
+        shmem = CreateFileMappingFromApp(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 4096, L"qdebug-shmem");
+    if (!event)
+        event = CreateEventEx(NULL, L"qdebug-event", 0, EVENT_ALL_ACCESS);
+
+    void *data = MapViewOfFileFromApp(shmem, FILE_MAP_WRITE, 0, 4096);
+    memset(data, quint32(type), sizeof(quint32));
+    memcpy_s(static_cast<quint32 *>(data) + 1, 4096 - sizeof(quint32),
+             message.data(), (message.length() + 1) * sizeof(wchar_t));
+    UnmapViewOfFile(data);
+    SetEvent(event);
+#endif // !Q_OS_WINPHONE
+    defaultMessageHandler(type, context, message);
+}
+
 class AppContainer : public Microsoft::WRL::RuntimeClass<Core::IFrameworkView>
 {
 public:
-    AppContainer(int argc, char *argv[]) : m_argc(argc)
+    AppContainer(int argc, char *argv[]) : m_argc(argc), m_deleteArgv0(false)
     {
         m_argv.reserve(argc);
-        for (int i = 0; i < argc; ++i)
+        for (int i = 0; i < argc; ++i) {
+            // Workaround for empty argv[0] which occurs when WMAppManifest's ImageParams is used
+            // The second argument is taken to be the executable
+            if (i == 0 && argc >= 2 && !qstrlen(argv[0])) {
+                const QByteArray argv0 = QDir::current()
+                        .absoluteFilePath(QString::fromLatin1(argv[1])).toUtf8();
+                m_argv.append(qstrdup(argv0.constData()));
+                m_argc -= 1;
+                m_deleteArgv0 = true;
+                ++i;
+                continue;
+            }
             m_argv.append(argv[i]);
+        }
     }
 
     ~AppContainer()
     {
+        if (m_deleteArgv0)
+            delete[] m_argv[0];
         for (int i = m_argc; i < m_argv.size(); ++i)
             delete[] m_argv[i];
     }
@@ -127,6 +162,10 @@ public:
             // (Unused) handle will automatically be closed when the app exits
             CreateFile2(reinterpret_cast<LPCWSTR>(pidFileName.utf16()),
                         0, FILE_SHARE_READ|FILE_SHARE_DELETE, CREATE_ALWAYS, &params);
+            // Install the develMode message handler
+#ifndef Q_OS_WINPHONE
+            defaultMessageHandler = qInstallMessageHandler(devMessageHandler);
+#endif
         }
         // Wait for debugger before continuing
         if (debugWait) {
@@ -161,6 +200,7 @@ private:
 
     int m_argc;
     QVector<char *> m_argv;
+    bool m_deleteArgv0;
     EventRegistrationToken m_activationToken;
 };
 

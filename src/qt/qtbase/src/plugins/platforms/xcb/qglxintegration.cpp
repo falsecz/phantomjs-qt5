@@ -130,7 +130,7 @@ static void updateFormatFromContext(QSurfaceFormat &format)
     }
 
     format.setProfile(QSurfaceFormat::NoProfile);
-    format.setOption(QSurfaceFormat::FormatOptions());
+    format.setOptions(QSurfaceFormat::FormatOptions());
 
     if (format.renderableType() == QSurfaceFormat::OpenGL) {
         if (format.version() < qMakePair(3, 0)) {
@@ -211,7 +211,7 @@ QGLXContext::QGLXContext(QXcbScreen *screen, const QSurfaceFormat &format, QPlat
                 // Don't bother with versions below ES 2.0
                 glVersions << 30 << 20;
                 // ES does not support any format option
-                m_format.setOption(QSurfaceFormat::FormatOptions());
+                m_format.setOptions(QSurfaceFormat::FormatOptions());
             }
 
             Q_ASSERT(glVersions.count() > 0);
@@ -328,7 +328,7 @@ QGLXContext::~QGLXContext()
 bool QGLXContext::makeCurrent(QPlatformSurface *surface)
 {
     bool success = false;
-    Q_ASSERT(surface->surface()->surfaceType() == QSurface::OpenGLSurface);
+    Q_ASSERT(surface->surface()->supportsOpenGL());
 
     Display *dpy = DISPLAY_FROM_XCB(m_screen);
     GLXDrawable glxDrawable = 0;
@@ -449,12 +449,32 @@ bool QGLXContext::m_supportsThreading = true;
 // binary search.
 static const char *qglx_threadedgl_blacklist_renderer[] = {
     "Chromium",                             // QTBUG-32225 (initialization fails)
-    "Mesa DRI Intel(R) Sandybridge Mobile", // QTBUG-34492 (flickering in fullscreen)
     0
 };
 
+// This disables threaded rendering on anything using mesa, e.g.
+// - nvidia/nouveau
+// - amd/gallium
+// - intel
+// - some software opengl implementations
+//
+// The client glx vendor string is used to identify those setups as that seems to show the least
+// variance between the bad configurations. It's always "Mesa Project and SGI". There are some
+// configurations which don't use mesa and which can do threaded rendering (amd and nvidia chips
+// with their own proprietary drivers).
+//
+// This, of course, is very broad and disables threaded rendering on a lot of devices which would
+// be able to use it. However, the bugs listed below don't follow any easily recognizable pattern
+// and we should rather be safe.
+//
+// http://cgit.freedesktop.org/xcb/libxcb/commit/?id=be0fe56c3bcad5124dcc6c47a2fad01acd16f71a will
+// fix some of the issues. Basically, the proprietary drivers seem to have a way of working around
+// a fundamental flaw with multithreaded access to xcb, but mesa doesn't. The blacklist should be
+// reevaluated once that patch is released in some version of xcb.
 static const char *qglx_threadedgl_blacklist_vendor[] = {
-    "nouveau",                             // QTCREATORBUG-10875 (crash in creator)
+    "Mesa Project and SGI",                // QTCREATORBUG-10875 (crash in creator)
+                                           // QTBUG-34492 (flickering in fullscreen)
+                                           // QTBUG-38221
     0
 };
 
@@ -493,19 +513,21 @@ void QGLXContext::queryDummyContext()
 
     m_supportsThreading = true;
 
-    const char *renderer = (const char *) glGetString(GL_RENDERER);
-    for (int i = 0; qglx_threadedgl_blacklist_renderer[i]; ++i) {
-        if (strstr(renderer, qglx_threadedgl_blacklist_renderer[i]) != 0) {
-            m_supportsThreading = false;
-            break;
+    if (const char *renderer = (const char *) glGetString(GL_RENDERER)) {
+        for (int i = 0; qglx_threadedgl_blacklist_renderer[i]; ++i) {
+            if (strstr(renderer, qglx_threadedgl_blacklist_renderer[i]) != 0) {
+                m_supportsThreading = false;
+                break;
+            }
         }
     }
 
-    const char *vendor = (const char *) glGetString(GL_VENDOR);
-    for (int i = 0; qglx_threadedgl_blacklist_vendor[i]; ++i) {
-        if (strstr(vendor, qglx_threadedgl_blacklist_vendor[i]) != 0) {
-            m_supportsThreading = false;
-            break;
+    if (glxvendor) {
+        for (int i = 0; qglx_threadedgl_blacklist_vendor[i]; ++i) {
+            if (strstr(glxvendor, qglx_threadedgl_blacklist_vendor[i]) != 0) {
+                m_supportsThreading = false;
+                break;
+            }
         }
     }
 
@@ -535,7 +557,7 @@ QGLXPbuffer::QGLXPbuffer(QOffscreenSurface *offscreenSurface)
             GLX_PBUFFER_HEIGHT, offscreenSurface->size().height(),
             GLX_LARGEST_PBUFFER, False,
             GLX_PRESERVED_CONTENTS, False,
-            GLX_NONE
+            None
         };
 
         m_pbuffer = glXCreatePbuffer(DISPLAY_FROM_XCB(m_screen), config, attributes);

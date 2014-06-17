@@ -51,10 +51,6 @@
 
 #include <xkbcommon/xkbcommon.h>
 
-#ifdef XKBCOMMON_0_2_0
-#include <xkbcommon_workaround.h>
-#endif
-
 #include <locale.h> // LC_CTYPE
 #include <string.h> // strchr, strncmp, etc.
 #include <strings.h> // strncasecmp
@@ -73,13 +69,19 @@ TableGenerator::TableGenerator() : m_state(NoErrors),
 
 void TableGenerator::initPossibleLocations()
 {
-    // To add an extra system path use the QTCOMPOSE environment variable
-    if (qEnvironmentVariableIsSet("QTCOMPOSE")) {
-        m_possibleLocations.append(QString(qgetenv("QTCOMPOSE")));
-    }
-
-    m_possibleLocations.append(QStringLiteral(COMPOSE_X11_PREFIX "/share/X11/locale"));
-    m_possibleLocations.append(QStringLiteral(COMPOSE_X11_PREFIX "/lib/X11/locale"));
+    // Compose files come as a part of Xlib library. Xlib doesn't provide
+    // a mechanism how to retrieve the location of these files reliably, since it was
+    // never meant for external software to parse compose tables directly. Best we
+    // can do is to hardcode search paths. To add an extra system path use
+    // the QTCOMPOSE environment variable
+    if (qEnvironmentVariableIsSet("QTCOMPOSE"))
+        m_possibleLocations.append(QString::fromLocal8Bit(qgetenv("QTCOMPOSE")));
+    m_possibleLocations.append(QStringLiteral("/usr/share/X11/locale"));
+    m_possibleLocations.append(QStringLiteral("/usr/local/share/X11/locale"));
+    m_possibleLocations.append(QStringLiteral("/usr/lib/X11/locale"));
+    m_possibleLocations.append(QStringLiteral("/usr/local/lib/X11/locale"));
+    m_possibleLocations.append(QStringLiteral(X11_PREFIX "/share/X11/locale"));
+    m_possibleLocations.append(QStringLiteral(X11_PREFIX "/lib/X11/locale"));
 }
 
 void TableGenerator::findComposeFile()
@@ -320,23 +322,7 @@ ushort TableGenerator::keysymToUtf8(quint32 sym)
     QByteArray chars;
     int bytes;
     chars.resize(8);
-
-#ifdef XKBCOMMON_0_2_0
-    if (needWorkaround(sym)) {
-        quint32 codepoint;
-        if (sym == XKB_KEY_KP_Space)
-            codepoint = XKB_KEY_space & 0x7f;
-        else
-            codepoint = sym & 0x7f;
-
-        bytes = utf32_to_utf8(codepoint, chars.data());
-    } else {
-        bytes = xkb_keysym_to_utf8(sym, chars.data(), chars.size());
-    }
-#else
     bytes = xkb_keysym_to_utf8(sym, chars.data(), chars.size());
-#endif
-
     if (bytes == -1)
         qWarning("TableGenerator::keysymToUtf8 - buffer too small");
 
@@ -347,7 +333,7 @@ ushort TableGenerator::keysymToUtf8(quint32 sym)
     qDebug() << QString("keysym - 0x%1 : utf8 - %2").arg(QString::number(sym, 16))
                                                     .arg(codec->toUnicode(chars));
 #endif
-    return QString::fromLocal8Bit(chars).at(0).unicode();
+    return QString::fromUtf8(chars).at(0).unicode();
 }
 
 static inline int fromBase8(const char *s, const char *end)
@@ -444,8 +430,10 @@ void TableGenerator::parseKeySequence(char *line)
                     elem.keys[i] = XKB_KEY_dead_invertedbreve;
                 else if (!strcmp(sym, "dead_double_grave"))
                     elem.keys[i] = XKB_KEY_dead_doublegrave;
+#ifdef DEBUG_GENERATOR
                 else
                     qWarning() << QString("Qt Warning - invalid keysym: %1").arg(sym);
+#endif
             }
         } else {
             elem.keys[i] = 0;

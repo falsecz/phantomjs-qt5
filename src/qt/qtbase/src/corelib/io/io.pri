@@ -135,6 +135,10 @@ win32 {
             OBJECTIVE_SOURCES += io/qurl_mac.mm
         }
         mac {
+            osx {
+                OBJECTIVE_SOURCES += io/qfilesystemwatcher_fsevents.mm
+                HEADERS += io/qfilesystemwatcher_fsevents_p.h
+            }
             macx {
                 SOURCES += io/qstandardpaths_mac.cpp
             } else:ios {
@@ -144,7 +148,7 @@ win32 {
             }
         } else:blackberry {
             SOURCES += io/qstandardpaths_blackberry.cpp
-        } else:android {
+        } else:android:!android-no-sdk {
             SOURCES += io/qstandardpaths_android.cpp
         } else {
             SOURCES += io/qstandardpaths_unix.cpp

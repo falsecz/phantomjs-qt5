@@ -32,7 +32,6 @@
 #include "hb-coretext.h"
 
 #include "hb-face-private.hh"
-#include <private/qfontengine_p.h>
 
 
 #ifndef HB_DEBUG_CORETEXT
@@ -42,6 +41,19 @@
 
 HB_SHAPER_DATA_ENSURE_DECLARE(coretext, face)
 HB_SHAPER_DATA_ENSURE_DECLARE(coretext, font)
+
+
+typedef bool (*qt_get_font_table_func_t) (void *user_data, unsigned int tag, unsigned char *buffer, unsigned int *length);
+
+struct FontEngineFaceData {
+  void *user_data;
+  qt_get_font_table_func_t get_font_table;
+};
+
+struct CoreTextFontEngineData {
+  CTFontRef ctFont;
+  CGFontRef cgFont;
+};
 
 
 /*
@@ -83,25 +95,11 @@ _hb_coretext_shaper_face_data_create (hb_face_t *face)
   if (unlikely (!data))
     return NULL;
 
-  QFontEngine *fe = (QFontEngine *) face->user_data;
-  if (fe->type () == QFontEngine::Mac)
-  {
-    data->cg_font = (CGFontRef) fe->userData ().value<void *> ();
-    if (likely (data->cg_font))
-      CFRetain (data->cg_font);
-  }
-  else
-  {
-  hb_blob_t *blob = hb_face_reference_blob (face);
-  unsigned int blob_length;
-  const char *blob_data = hb_blob_get_data (blob, &blob_length);
-  if (unlikely (!blob_length))
-    DEBUG_MSG (CORETEXT, face, "Face has empty blob");
-
-  CGDataProviderRef provider = CGDataProviderCreateWithData (blob, blob_data, blob_length, &release_data);
-  data->cg_font = CGFontCreateWithDataProvider (provider);
-  CGDataProviderRelease (provider);
-  }
+  FontEngineFaceData *fontEngineFaceData = (FontEngineFaceData *) face->user_data;
+  CoreTextFontEngineData *coreTextFontEngineData = (CoreTextFontEngineData *) fontEngineFaceData->user_data;
+  data->cg_font = coreTextFontEngineData->cgFont;
+  if (likely (data->cg_font))
+    CFRetain (data->cg_font);
 
   if (unlikely (!data->cg_font)) {
     DEBUG_MSG (CORETEXT, face, "Face CGFontCreateWithDataProvider() failed");
@@ -146,9 +144,13 @@ _hb_coretext_shaper_font_data_create (hb_font_t *font)
     return NULL;
 
   hb_face_t *face = font->face;
-  hb_coretext_shaper_face_data_t *face_data = HB_SHAPER_DATA_GET (face);
 
-  data->ct_font = CTFontCreateWithGraphicsFont (face_data->cg_font, font->y_scale / 64, NULL, NULL);
+  FontEngineFaceData *fontEngineFaceData = (FontEngineFaceData *) face->user_data;
+  CoreTextFontEngineData *coreTextFontEngineData = (CoreTextFontEngineData *) fontEngineFaceData->user_data;
+  data->ct_font = coreTextFontEngineData->ctFont;
+  if (likely (data->ct_font))
+    CFRetain (data->ct_font);
+
   if (unlikely (!data->ct_font)) {
     DEBUG_MSG (CORETEXT, font, "Font CTFontCreateWithGraphicsFont() failed");
     free (data);
@@ -688,12 +690,10 @@ _hb_coretext_shape (hb_shape_plan_t    *shape_plan,
      */
     CFDictionaryRef attributes = CTRunGetAttributes (run);
     CTFontRef run_ct_font = static_cast<CTFontRef>(CFDictionaryGetValue (attributes, kCTFontAttributeName));
-    CGFontRef run_cg_font = CTFontCopyGraphicsFont (run_ct_font, 0);
-    if (!CFEqual (run_cg_font, face_data->cg_font))
-    {
-        CFRelease (run_cg_font);
 
-	CFRange range = CTRunGetStringRange (run);
+    CFRange range = CTRunGetStringRange (run);
+    if (!CFEqual (run_ct_font, font_data->ct_font))
+    {
 	buffer->ensure (buffer->len + range.length);
 	if (buffer->in_error)
 	  FAIL ("Buffer resize failed");
@@ -728,13 +728,17 @@ _hb_coretext_shape (hb_shape_plan_t    *shape_plan,
         }
         continue;
     }
-    CFRelease (run_cg_font);
+
+    /* CoreText throws away the PDF token, while the OpenType backend will add a zero-advance
+     * glyph for this. We need to make sure the two produce the same output. */
+    UniChar endGlyph = CFStringGetCharacterAtIndex(string_ref, range.location + range.length - 1);
+    bool endWithPDF = endGlyph == 0x202c;
 
     unsigned int num_glyphs = CTRunGetGlyphCount (run);
     if (num_glyphs == 0)
       continue;
 
-    buffer->ensure (buffer->len + num_glyphs);
+    buffer->ensure (buffer->len + num_glyphs + (endWithPDF ? 1 : 0));
 
     scratch = buffer->get_scratch_buffer (&scratch_size);
 
@@ -781,9 +785,26 @@ _hb_coretext_shape (hb_shape_plan_t    *shape_plan,
 
       buffer->len++;
     }
+
+    if (endWithPDF) {
+        hb_glyph_info_t *info = &buffer->info[buffer->len];
+
+        info->codepoint = 0xffff;
+        info->cluster = range.location + range.length - 1;
+
+        /* Currently, we do all x-positioning by setting the advance, we never use x-offset. */
+        info->mask = 0;
+        info->var1.u32 = 0;
+        info->var2.u32 = 0;
+
+        buffer->len++;
+    }
   }
 
   buffer->clear_positions ();
+
+  bool bufferRtl = !HB_DIRECTION_IS_FORWARD (buffer->props.direction);
+  bool runRtl = (CTRunGetStatus(static_cast<CTRunRef>(CFArrayGetValueAtIndex(glyph_runs, 0))) & kCTRunStatusRightToLeft);
 
   unsigned int count = buffer->len;
   for (unsigned int i = 0; i < count; ++i) {
@@ -794,6 +815,12 @@ _hb_coretext_shape (hb_shape_plan_t    *shape_plan,
     pos->x_advance = info->mask;
     pos->x_offset = info->var1.u32;
     pos->y_offset = info->var2.u32;
+
+    if (bufferRtl != runRtl && i < count / 2) {
+        unsigned int temp = buffer->info[count - i - 1].cluster;
+        buffer->info[count - i - 1].cluster = info->cluster;
+        info->cluster = temp;
+    }
   }
 
   /* Fix up clusters so that we never return out-of-order indices;

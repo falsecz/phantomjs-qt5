@@ -99,7 +99,7 @@ enum ExpandFunc {
     E_UPPER, E_LOWER, E_TITLE, E_FILES, E_PROMPT, E_RE_ESCAPE, E_VAL_ESCAPE,
     E_REPLACE, E_SORT_DEPENDS, E_RESOLVE_DEPENDS, E_ENUMERATE_VARS,
     E_SHADOWED, E_ABSOLUTE_PATH, E_RELATIVE_PATH, E_CLEAN_PATH,
-    E_SYSTEM_PATH, E_SHELL_PATH, E_SYSTEM_QUOTE, E_SHELL_QUOTE
+    E_SYSTEM_PATH, E_SHELL_PATH, E_SYSTEM_QUOTE, E_SHELL_QUOTE, E_GETENV
 };
 
 enum TestFunc {
@@ -156,6 +156,7 @@ void QMakeEvaluator::initFunctionStatics()
         { "shell_path", E_SHELL_PATH },
         { "system_quote", E_SYSTEM_QUOTE },
         { "shell_quote", E_SHELL_QUOTE },
+        { "getenv", E_GETENV },
     };
     for (unsigned i = 0; i < sizeof(expandInits)/sizeof(expandInits[0]); ++i)
         statics.expands.insert(ProKey(expandInits[i].name), expandInits[i].func);
@@ -1090,6 +1091,15 @@ ProStringList QMakeEvaluator::evaluateBuiltinExpand(
             ret << (rstr.isSharedWith(m_tmp1) ? args.at(0) : ProString(rstr).setSource(args.at(0)));
         }
         break;
+    case E_GETENV:
+        if (args.count() != 1) {
+            evalError(fL1S("getenv(arg) requires one argument."));
+        } else {
+            const ProString &var = args.at(0);
+            const ProString &val = ProString(m_option->getEnv(var.toQString(m_tmp1)));
+            ret << val;
+        }
+        break;
     default:
         evalError(fL1S("Function '%1' is not implemented.").arg(func.toQString(m_tmp1)));
         break;
@@ -1267,9 +1277,9 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::evaluateBuiltinConditional(
             return ReturnFalse;
         }
         int cnt = values(map(args.at(0))).count();
+        int val = args.at(1).toQString(m_tmp1).toInt();
         if (args.count() == 3) {
             const ProString &comp = args.at(2);
-            const int val = args.at(1).toQString(m_tmp1).toInt();
             if (comp == QLatin1String(">") || comp == QLatin1String("greaterThan")) {
                 return returnBool(cnt > val);
             } else if (comp == QLatin1String(">=")) {
@@ -1280,13 +1290,13 @@ QMakeEvaluator::VisitReturn QMakeEvaluator::evaluateBuiltinConditional(
                 return returnBool(cnt <= val);
             } else if (comp == QLatin1String("equals") || comp == QLatin1String("isEqual")
                        || comp == QLatin1String("=") || comp == QLatin1String("==")) {
-                return returnBool(cnt == val);
+                // fallthrough
             } else {
                 evalError(fL1S("Unexpected modifier to count(%2).").arg(comp.toQString(m_tmp1)));
                 return ReturnFalse;
             }
         }
-        return returnBool(cnt == args.at(1).toQString(m_tmp1).toInt());
+        return returnBool(cnt == val);
     }
     case T_GREATERTHAN:
     case T_LESSTHAN: {

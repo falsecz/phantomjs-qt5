@@ -153,7 +153,7 @@
 #    define Q_CC_INTEL
 #    define Q_ASSUME_IMPL(expr)  __assume(expr)
 #    define Q_UNREACHABLE_IMPL() __builtin_unreachable()
-#    if __INTEL_COMPILER >= 1300
+#    if __INTEL_COMPILER >= 1300 && !defined(__APPLE__)
 #      define Q_DECL_DEPRECATED_X(text) __attribute__ ((__deprecated__(text)))
 #    endif
 #  elif defined(__clang__)
@@ -483,12 +483,15 @@
  *  N3652           Q_COMPILER_RELAXED_CONSTEXPR_FUNCTIONS
  *  N3386 N3638     Q_COMPILER_RETURN_TYPE_DEDUCTION
  *  N3651           Q_COMPILER_VARIABLE_TEMPLATES
+ *
+ * C++14 Technical Specifications / C++17:
  *  N3639           Q_COMPILER_VLA  (see also Q_COMPILER_RESTRICTED_VLA)
  *
  */
 
 #ifdef Q_CC_INTEL
 #  define Q_COMPILER_RESTRICTED_VLA
+#  define Q_COMPILER_VARIADIC_MACROS // C++11 feature supported as an extension in other modes, too
 #  if __INTEL_COMPILER < 1200
 #    define Q_NO_TEMPLATE_FRIENDS
 #  endif
@@ -498,7 +501,6 @@
 #     define Q_COMPILER_BINARY_LITERALS
 #  endif
 #  if __cplusplus >= 201103L
-#    define Q_COMPILER_VARIADIC_MACROS
 #    if __INTEL_COMPILER >= 1200
 #      define Q_COMPILER_AUTO_TYPE
 #      define Q_COMPILER_CLASS_ENUM
@@ -509,7 +511,6 @@
 #      define Q_COMPILER_LAMBDA
 #      define Q_COMPILER_RVALUE_REFS
 #      define Q_COMPILER_STATIC_ASSERT
-#      define Q_COMPILER_THREAD_LOCAL
 #      define Q_COMPILER_VARIADIC_MACROS
 #    endif
 #    if __INTEL_COMPILER >= 1210
@@ -540,7 +541,7 @@
 #  endif
 #endif
 
-#ifdef Q_CC_CLANG
+#if defined(Q_CC_CLANG) && !defined(Q_CC_INTEL)
 /* General C++ features */
 #  define Q_COMPILER_RESTRICTED_VLA
 #  if !__has_feature(cxx_exceptions)
@@ -559,6 +560,15 @@
 // It's been supported "since the dawn of time itself" (cf. commit 179883)
 #  if __has_extension(cxx_binary_literals)
 #    define Q_COMPILER_BINARY_LITERALS
+#  endif
+
+// Variadic macros are supported for gnu++98, c++11, c99 ... since 2.9
+#  if ((__clang_major__ * 100) + __clang_minor__) >= 209
+#    if !defined(__STRICT_ANSI__) || defined(__GXX_EXPERIMENTAL_CXX0X__) \
+      || (defined(__cplusplus) && (__cplusplus >= 201103L)) \
+      || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
+#      define Q_COMPILER_VARIADIC_MACROS
+#    endif
 #  endif
 
 /* C++11 features, see http://clang.llvm.org/cxx_status.html */
@@ -657,7 +667,6 @@
     /* Features that have no __has_feature() check */
 #    if ((__clang_major__ * 100) + __clang_minor__) >= 209 /* since clang 2.9 */
 #      define Q_COMPILER_EXTERN_TEMPLATES
-#      define Q_COMPILER_VARIADIC_MACROS
 #    endif
 #  endif
 
@@ -694,13 +703,18 @@
 //   GCC supports binary literals in C, C++98 and C++11 modes
 #    define Q_COMPILER_BINARY_LITERALS
 #  endif
+#  if !defined(__STRICT_ANSI__) || defined(__GXX_EXPERIMENTAL_CXX0X__) \
+    || (defined(__cplusplus) && (__cplusplus >= 201103L)) \
+    || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
+     // Variadic macros are supported for gnu++98, c++11, C99 ... since forever (gcc 2.97)
+#    define Q_COMPILER_VARIADIC_MACROS
+#  endif
 #  if defined(__GXX_EXPERIMENTAL_CXX0X__) || __cplusplus >= 201103L
 #    if (__GNUC__ * 100 + __GNUC_MINOR__) >= 403
        /* C++11 features supported in GCC 4.3: */
 #      define Q_COMPILER_DECLTYPE
 #      define Q_COMPILER_RVALUE_REFS
 #      define Q_COMPILER_STATIC_ASSERT
-#      define Q_COMPILER_VARIADIC_MACROS
 #    endif
 #    if (__GNUC__ * 100 + __GNUC_MINOR__) >= 404
        /* C++11 features supported in GCC 4.4: */
@@ -762,7 +776,6 @@
 //#    define Q_COMPILER_BINARY_LITERALS   // already supported since GCC 4.3 as an extension
 #      define Q_COMPILER_LAMBDA_CAPTURES
 #      define Q_COMPILER_RETURN_TYPE_DEDUCTION
-#      define Q_COMPILER_VLA
 #    endif
 #  endif
 #endif
@@ -814,31 +827,43 @@
 #      define Q_COMPILER_DELEGATING_CONSTRUCTORS
 #      define Q_COMPILER_EXPLICIT_CONVERSIONS
 #      define Q_COMPILER_NONSTATIC_MEMBER_INIT
-#      define Q_COMPILER_INITIALIZER_LISTS
+// implemented, but nested initialization fails (eg tst_qvector): http://connect.microsoft.com/VisualStudio/feedback/details/800364/initializer-list-calls-object-destructor-twice
+//      #define Q_COMPILER_INITIALIZER_LISTS
 // implemented in principle, but has a bug that makes it unusable: http://connect.microsoft.com/VisualStudio/feedback/details/802058/c-11-unified-initialization-fails-with-c-style-arrays
 //      #define Q_COMPILER_UNIFORM_INIT
 #      define Q_COMPILER_RAW_STRINGS
 #      define Q_COMPILER_TEMPLATE_ALIAS
 #      define Q_COMPILER_VARIADIC_TEMPLATES
 #    endif /* VC 12 */
+#    if _MSC_FULL_VER >= 180030324 // VC 12 SP 2 RC
+#      define Q_COMPILER_INITIALIZER_LISTS
+#    endif /* VC 12 SP 2 RC */
+
 #endif /* Q_CC_MSVC */
 
 #ifdef __cplusplus
+# include <utility>
 # if defined(Q_OS_QNX)
-#  include <utility>
 #  if defined(_YVALS) || defined(_LIBCPP_VER)
 // QNX: libcpp (Dinkumware-based) doesn't have the <initializer_list>
 // header, so the feature is useless, even if the compiler supports
 // it. Disable.
-#    ifdef Q_COMPILER_INITIALIZER_LISTS
-#      undef Q_COMPILER_INITIALIZER_LISTS
-#    endif
-#    ifdef Q_COMPILER_RVALUE_REFS
-#      undef Q_COMPILER_RVALUE_REFS
-#    endif
+#    undef Q_COMPILER_INITIALIZER_LISTS
+// That libcpp doesn't have std::move either, so disable everything
+// related to rvalue refs.
+#    undef Q_COMPILER_RVALUE_REFS
+#    undef Q_COMPILER_REF_QUALIFIERS
 #  endif
+# endif // Q_OS_QNX
+# if (defined(Q_CC_CLANG) || defined(Q_CC_INTEL)) && defined(Q_OS_MAC) && defined(__GNUC_LIBSTD__) \
+    && ((__GNUC_LIBSTD__-0) * 100 + __GNUC_LIBSTD_MINOR__-0 <= 402)
+// Mac OS X: Apple has not updated libstdc++ since 2007, which means it does not have
+// <initializer_list> or std::move. Let's disable these features
+#  undef Q_COMPILER_INITIALIZER_LISTS
+#  undef Q_COMPILER_RVALUE_REFS
+#  undef Q_COMPILER_REF_QUALIFIERS
 # endif
-#endif // Q_OS_QNX
+#endif
 
 /*
  * C++11 keywords and expressions
@@ -846,7 +871,7 @@
 #ifdef Q_COMPILER_NULLPTR
 # define Q_NULLPTR         nullptr
 #else
-# define Q_NULLPTR         0
+# define Q_NULLPTR         NULL
 #endif
 
 #ifdef Q_COMPILER_DEFAULT_MEMBERS

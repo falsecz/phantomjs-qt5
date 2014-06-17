@@ -32,6 +32,7 @@ unix {
 			(cd config.tests/unix/libjpeg && $(MAKE) distclean); \
 			(cd config.tests/unix/libpng && $(MAKE) distclean); \
                         (cd config.tests/unix/slog2 && $(MAKE) distclean); \
+                        (cd config.tests/unix/lgmon && $(MAKE) distclean); \
 			(cd config.tests/x11/xcursor && $(MAKE) distclean); \
 			(cd config.tests/x11/xrender && $(MAKE) distclean); \
 			(cd config.tests/x11/xrandr && $(MAKE) distclean); \
@@ -175,6 +176,14 @@ FEATURES_PRI = \
     $$FEATURES_PRI \
     "QT_DISABLED_FEATURES = \$\$unique(QT_DISABLED_FEATURES)"
 write_file($$OUT_PWD/mkspecs/qfeatures.pri, FEATURES_PRI)|error("Aborting.")
+
+# Create forwarding headers for qconfig.h
+FWD_QCONFIG_H = \
+    '$${LITERAL_HASH}include "../../src/corelib/global/qconfig.h"'
+write_file($$OUT_PWD/include/QtCore/qconfig.h, FWD_QCONFIG_H)|error("Aborting.")
+FWD_QTCONFIG = \
+    '$${LITERAL_HASH}include "qconfig.h"'
+write_file($$OUT_PWD/include/QtCore/QtConfig, FWD_QTCONFIG)|error("Aborting.")
 
 #mkspecs
 mkspecs.path = $$[QT_HOST_DATA]/mkspecs

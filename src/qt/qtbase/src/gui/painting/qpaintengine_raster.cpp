@@ -523,7 +523,7 @@ bool QRasterPaintEngine::begin(QPaintDevice *device)
 #endif
 
     if (d->mono_surface)
-        d->glyphCacheType = QFontEngineGlyphCache::Raster_Mono;
+        d->glyphCacheFormat = QFontEngine::Format_Mono;
 #if defined(Q_OS_WIN)
     else if (clearTypeFontsEnabled())
 #else
@@ -532,11 +532,11 @@ bool QRasterPaintEngine::begin(QPaintDevice *device)
     {
         QImage::Format format = static_cast<QImage *>(d->device)->format();
         if (format == QImage::Format_ARGB32_Premultiplied || format == QImage::Format_RGB32)
-            d->glyphCacheType = QFontEngineGlyphCache::Raster_RGBMask;
+            d->glyphCacheFormat = QFontEngine::Format_A32;
         else
-            d->glyphCacheType = QFontEngineGlyphCache::Raster_A8;
+            d->glyphCacheFormat = QFontEngine::Format_A8;
     } else
-        d->glyphCacheType = QFontEngineGlyphCache::Raster_A8;
+        d->glyphCacheFormat = QFontEngine::Format_A8;
 
     setActive(true);
     return true;
@@ -2232,11 +2232,11 @@ namespace {
 /*!
     \reimp
 */
-void QRasterPaintEngine::drawImage(const QRectF &r, const QImage &_img, const QRectF &_sr,
+void QRasterPaintEngine::drawImage(const QRectF &r, const QImage &img, const QRectF &sr,
                                    Qt::ImageConversionFlags)
 {
 #ifdef QT_DEBUG_DRAW
-    qDebug() << " - QRasterPaintEngine::drawImage(), r=" << r << " sr=" << _sr << " image=" << _img.size() << "depth=" << img.depth();
+    qDebug() << " - QRasterPaintEngine::drawImage(), r=" << r << " sr=" << sr << " image=" << img.size() << "depth=" << img.depth();
 #endif
 
     if (r.isEmpty())
@@ -2244,17 +2244,6 @@ void QRasterPaintEngine::drawImage(const QRectF &r, const QImage &_img, const QR
 
     Q_D(QRasterPaintEngine);
     QRasterPaintEngineState *s = state();
-
-    QImage img;
-    QRectF sr=_sr;
-    if (s->matrix.isAffine()) {
-        img = _img.copy(sr.toRect()).scaled(
-            s->matrix.mapRect(r).size().toSize(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        sr = img.rect();
-    } else {
-        img=_img;
-    }
-
     int sr_l = qFloor(sr.left());
     int sr_r = qCeil(sr.right()) - 1;
     int sr_t = qFloor(sr.top());
@@ -2388,7 +2377,7 @@ void QRasterPaintEngine::drawImage(const QRectF &r, const QImage &_img, const QR
                 SrcOverScaleFunc func = qScaleFunctions[d->rasterBuffer->format][img.format()];
                 if (func && (!clip || clip->hasRectClip)) {
                     func(d->rasterBuffer->buffer(), d->rasterBuffer->bytesPerLine(),
-                         img.bits(), img.bytesPerLine(),
+                         img.bits(), img.bytesPerLine(), img.height(),
                          qt_mapRect_non_normalizing(r, s->matrix), sr,
                          !clip ? d->deviceRect : clip->clipRect,
                          s->intOpacity);
@@ -2830,12 +2819,12 @@ bool QRasterPaintEngine::drawCachedGlyphs(int numGlyphs, const glyph_t *glyphs,
         }
 
     } else {
-        QFontEngineGlyphCache::Type glyphType = fontEngine->glyphFormat >= 0 ? QFontEngineGlyphCache::Type(fontEngine->glyphFormat) : d->glyphCacheType;
+        QFontEngine::GlyphFormat glyphFormat = fontEngine->glyphFormat != QFontEngine::Format_None ? fontEngine->glyphFormat : d->glyphCacheFormat;
 
         QImageTextureGlyphCache *cache =
-            static_cast<QImageTextureGlyphCache *>(fontEngine->glyphCache(0, glyphType, s->matrix));
+            static_cast<QImageTextureGlyphCache *>(fontEngine->glyphCache(0, glyphFormat, s->matrix));
         if (!cache) {
-            cache = new QImageTextureGlyphCache(glyphType, s->matrix);
+            cache = new QImageTextureGlyphCache(glyphFormat, s->matrix);
             fontEngine->setGlyphCache(0, cache);
         }
 
@@ -2853,7 +2842,7 @@ bool QRasterPaintEngine::drawCachedGlyphs(int numGlyphs, const glyph_t *glyphs,
         else if (depth == 1)
             rightShift = 3; // divide by 8
 
-        int margin = fontEngine->glyphMargin(glyphType);
+        int margin = fontEngine->glyphMargin(glyphFormat);
         const uchar *bits = image.bits();
         for (int i=0; i<numGlyphs; ++i) {
 
@@ -2876,7 +2865,7 @@ bool QRasterPaintEngine::drawCachedGlyphs(int numGlyphs, const glyph_t *glyphs,
 
             const uchar *glyphBits = bits + ((c.x << leftShift) >> rightShift) + c.y * bpl;
 
-            if (glyphType == QFontEngineGlyphCache::Raster_ARGB) {
+            if (glyphFormat == QFontEngine::Format_ARGB) {
                 // The current state transform has already been applied to the positions,
                 // so we prevent drawImage() from re-applying the transform by clearing
                 // the state for the duration of the call.
@@ -3075,7 +3064,7 @@ void QRasterPaintEngine::drawTextItem(const QPointF &p, const QTextItem &textIte
     Q_D(QRasterPaintEngine);
     fprintf(stderr," - QRasterPaintEngine::drawTextItem(), (%.2f,%.2f), string=%s ct=%d\n",
            p.x(), p.y(), QString::fromRawData(ti.chars, ti.num_chars).toLatin1().data(),
-           d->glyphCacheType);
+           d->glyphCacheFormat);
 #endif
 
     if (ti.glyphs.numGlyphs == 0)

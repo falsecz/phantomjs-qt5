@@ -123,7 +123,8 @@ QT_BEGIN_NAMESPACE
     on the return value from programId().  Then the application should
     call link(), which will notice that the program has already been
     specified and linked, allowing other operations to be performed
-    on the shader program.
+    on the shader program. The shader program's id can be explicitly
+    created using the create() function.
 
     \sa QOpenGLShader
 */
@@ -175,13 +176,15 @@ public:
 #endif
     {
 #ifndef QT_OPENGL_ES_2
-        QSurfaceFormat f = ctx->format();
+        if (!ctx->isOpenGLES()) {
+            QSurfaceFormat f = ctx->format();
 
-        // Geometry shaders require OpenGL >= 3.2
-        if (shaderType & QOpenGLShader::Geometry)
-            supportsGeometryShaders = (f.version() >= qMakePair<int, int>(3, 2));
-        else if (shaderType & (QOpenGLShader::TessellationControl | QOpenGLShader::TessellationEvaluation))
-            supportsTessellationShaders = (f.version() >= qMakePair<int, int>(4, 0));
+            // Geometry shaders require OpenGL >= 3.2
+            if (shaderType & QOpenGLShader::Geometry)
+                supportsGeometryShaders = (f.version() >= qMakePair<int, int>(3, 2));
+            else if (shaderType & (QOpenGLShader::TessellationControl | QOpenGLShader::TessellationEvaluation))
+                supportsTessellationShaders = (f.version() >= qMakePair<int, int>(4, 0));
+        }
 #endif
     }
     ~QOpenGLShaderPrivate();
@@ -441,7 +444,8 @@ bool QOpenGLShader::compileSourceCode(const char *source)
         }
 
 #ifdef QOpenGL_REDEFINE_HIGHP
-        if (d->shaderType == Fragment && !ctx_d->workaround_missingPrecisionQualifiers) {
+        if (d->shaderType == Fragment && !ctx_d->workaround_missingPrecisionQualifiers
+            && QOpenGLContext::currentContext()->isOpenGLES()) {
             src.append(redefineHighp);
             srclen.append(GLint(sizeof(redefineHighp) - 1));
         }
@@ -636,6 +640,26 @@ QOpenGLShaderProgram::~QOpenGLShaderProgram()
 {
 }
 
+/*!
+    Requests the shader program's id to be created immediately. Returns \c true
+    if successful; \c false otherwise.
+
+    This function is primarily useful when combining QOpenGLShaderProgram
+    with other OpenGL functions that operate directly on the shader
+    program id, like \c {GL_OES_get_program_binary}.
+
+    When the shader program is used normally, the shader program's id will
+    be created on demand.
+
+    \sa programId()
+
+    \since 5.3
+ */
+bool QOpenGLShaderProgram::create()
+{
+    return init();
+}
+
 bool QOpenGLShaderProgram::init()
 {
     Q_D(QOpenGLShaderProgram);
@@ -650,7 +674,8 @@ bool QOpenGLShaderProgram::init()
 #ifndef QT_OPENGL_ES_2
     // Resolve OpenGL 4 functions for tessellation shader support
     QSurfaceFormat format = context->format();
-    if (format.version() >= qMakePair<int, int>(4, 0)) {
+    if (!context->isOpenGLES()
+        && format.version() >= qMakePair<int, int>(4, 0)) {
         d->tessellationFuncs = context->versionFunctions<QOpenGLFunctions_4_0_Core>();
         d->tessellationFuncs->initializeOpenGLFunctions();
     }
@@ -1491,6 +1516,9 @@ void QOpenGLShaderProgram::setAttributeArray
     The setAttributeBuffer() function can be used to set the attribute
     array to an offset within a vertex buffer.
 
+    \note Normalization will be enabled. If this is not desired, call
+    glVertexAttribPointer directly through QOpenGLFunctions.
+
     \sa setAttributeValue(), setUniformValue(), enableAttributeArray()
     \sa disableAttributeArray(), setAttributeBuffer()
 */
@@ -1633,6 +1661,9 @@ void QOpenGLShaderProgram::setAttributeArray
     The array will become active when enableAttributeArray() is called
     on the \a location.  Otherwise the value specified with
     setAttributeValue() for \a location will be used.
+
+    \note Normalization will be enabled. If this is not desired, call
+    glVertexAttribPointer directly through QOpenGLFunctions.
 
     \sa setAttributeArray()
 */
@@ -3010,7 +3041,8 @@ int QOpenGLShaderProgram::maxGeometryOutputVertices() const
 {
     GLint n = 0;
 #if defined(QT_OPENGL_3_2)
-    glGetIntegerv(GL_MAX_GEOMETRY_OUTPUT_VERTICES, &n);
+    Q_D(const QOpenGLShaderProgram);
+    d->glfuncs->glGetIntegerv(GL_MAX_GEOMETRY_OUTPUT_VERTICES, &n);
 #endif
     return n;
 }
@@ -3248,14 +3280,16 @@ bool QOpenGLShader::hasOpenGLShaders(ShaderType type, QOpenGLContext *context)
 #ifndef QT_OPENGL_ES_2
         // Geometry shaders require OpenGL 3.2 or newer
         QSurfaceFormat format = context->format();
-        return (format.version() >= qMakePair<int, int>(3, 2));
+        return (!context->isOpenGLES())
+            && (format.version() >= qMakePair<int, int>(3, 2));
 #else
         // No geometry shader support in OpenGL ES2
         return false;
 #endif
     } else if (type == TessellationControl || type == TessellationEvaluation) {
 #if !defined(QT_OPENGL_ES_2)
-        return (format.version() >= qMakePair<int, int>(4, 0));
+        return (!context->isOpenGLES())
+            && (format.version() >= qMakePair<int, int>(4, 0));
 #else
         // No tessellation shader support in OpenGL ES2
         return false;

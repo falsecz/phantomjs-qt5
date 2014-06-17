@@ -48,7 +48,9 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonParseError>
+#include <QMimeDatabase>
 #include <QUrl>
+#include <private/qppsobject_p.h>
 
 #include <bps/navigator.h>
 #include <bps/navigator_invoke.h>
@@ -118,7 +120,7 @@ void QQnxFilePicker::open()
     }
 
     QVariantMap map;
-    map[QStringLiteral("Type")] = QStringLiteral("Other");
+    map[QStringLiteral("Type")] = filePickerType();
     map[QStringLiteral("Mode")] = modeToString(m_mode);
     map[QStringLiteral("Title")] = m_title;
     map[QStringLiteral("ViewMode")] = QStringLiteral("Default");
@@ -128,15 +130,20 @@ void QQnxFilePicker::open()
     map[QStringLiteral("AllowOverwrite")] = false;
 
     if (!m_defaultSaveFileNames.isEmpty())
-        map[QStringLiteral("DefaultFileNames")] = m_defaultSaveFileNames.join(",");
+        map[QStringLiteral("DefaultFileNames")] = m_defaultSaveFileNames.join(QLatin1Char(','));
     if (!m_filters.isEmpty())
-        map[QStringLiteral("Filter")] = m_filters.join(";");
+        map[QStringLiteral("Filter")] = m_filters.join(QLatin1Char(';'));
 
+    QByteArray ppsData;
+#if defined(Q_OS_BLACKBERRY_TABLET)
     QJsonDocument document;
     document.setObject(QJsonObject::fromVariantMap(map));
-    const QByteArray jsonData = document.toJson(QJsonDocument::Compact);
+    ppsData = document.toJson(QJsonDocument::Compact);
+#else
+    ppsData = QPpsObject::encode(map);
+#endif
 
-    errorCode = navigator_invoke_invocation_set_data(m_invocationHandle, jsonData.constData(), jsonData.size());
+    errorCode = navigator_invoke_invocation_set_data(m_invocationHandle, ppsData.constData(), ppsData.size());
     if (errorCode != BPS_SUCCESS) {
         cleanup();
         qWarning() << "QQnxFilePicker: unable to set data:" << strerror(errno);
@@ -273,6 +280,39 @@ void QQnxFilePicker::handleFilePickerResponse(const char *data)
 
     Q_EMIT closed();
     cleanup();
+}
+
+QString QQnxFilePicker::filePickerType() const
+{
+    bool images = false;
+    bool video = false;
+    bool music = false;
+    QMimeDatabase mimeDb;
+    for (int i = 0; i < m_filters.count(); i++) {
+        QList<QMimeType> mimeTypes = mimeDb.mimeTypesForFileName(m_filters.at(i));
+        if (mimeTypes.isEmpty())
+            return QStringLiteral("Other");
+
+        if (mimeTypes.first().name().startsWith(QLatin1String("image")))
+            images = true;
+        else if (mimeTypes.first().name().startsWith(QLatin1String("audio")))
+            music = true;
+        else if (mimeTypes.first().name().startsWith(QLatin1String("video")))
+            video = true;
+        else
+            return QStringLiteral("Other");
+    }
+
+    if (!video && !music)
+        return QStringLiteral("Picture");
+
+    if (!images && !music)
+        return QStringLiteral("Video");
+
+    if (!images && !video)
+        return QStringLiteral("Music");
+
+    return QStringLiteral("Other");
 }
 
 QString QQnxFilePicker::modeToString(QQnxFilePicker::Mode mode) const

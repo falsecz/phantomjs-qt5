@@ -78,6 +78,8 @@
 #include "private/qstyle_p.h"
 #include "qfileinfo.h"
 #include <QtGui/qinputmethod.h>
+#include <QtGui/qopenglcontext.h>
+#include <QtGui/private/qopenglcontext_p.h>
 
 #include <private/qgraphicseffect_p.h>
 #include <qbackingstore.h>
@@ -270,6 +272,8 @@ QWidgetPrivate::QWidgetPrivate(int version)
       , isMoved(0)
       , usesDoubleBufferedGLContext(0)
       , mustHaveWindowHandle(0)
+      , renderToTexture(0)
+      , textureChildSeen(0)
 #ifndef QT_NO_IM
       , inheritsInputMethodHints(0)
 #endif
@@ -1558,6 +1562,7 @@ void QWidgetPrivate::createTLExtra()
         x->inRepaint = false;
         x->embedded = 0;
         x->window = 0;
+        x->shareContext = 0;
         x->screenIndex = 0;
 #ifdef Q_WS_MAC
         x->wasMaximized = false;
@@ -2400,7 +2405,8 @@ void QWidget::setStyleSheet(const QString& styleSheet)
     }
 
     if (proxy) { // style sheet update
-        proxy->repolish(this);
+        if (d->polished)
+            proxy->repolish(this);
         return;
     }
 
@@ -2831,7 +2837,10 @@ void QWidget::showFullScreen()
     setWindowState((windowState() & ~(Qt::WindowMinimized | Qt::WindowMaximized))
                    | Qt::WindowFullScreen);
     setVisible(true);
+#if !defined Q_OS_QNX // On QNX this window will be activated anyway from libscreen
+                      // activating it here before libscreen activates it causes problems
     activateWindow();
+#endif
 }
 
 /*!
@@ -4672,7 +4681,8 @@ void QWidget::unsetCursor()
 void QWidget::render(QPaintDevice *target, const QPoint &targetOffset,
                      const QRegion &sourceRegion, RenderFlags renderFlags)
 {
-    d_func()->render(target, targetOffset, sourceRegion, renderFlags, false);
+    QPainter p(target);
+    render(&p, targetOffset, sourceRegion, renderFlags);
 }
 
 /*!
@@ -4716,9 +4726,6 @@ void QWidget::render(QPainter *painter, const QPoint &targetOffset,
         d->createExtra();
     d->extra->inRenderWithPainter = true;
 
-#ifdef Q_WS_MAC
-    d->render_helper(painter, targetOffset, toBePainted, renderFlags);
-#else
     QPaintEngine *engine = painter->paintEngine();
     Q_ASSERT(engine);
     QPaintEnginePrivate *enginePriv = engine->d_func();
@@ -4729,7 +4736,7 @@ void QWidget::render(QPainter *painter, const QPoint &targetOffset,
     // Render via a pixmap when dealing with non-opaque painters or printers.
     if (!inRenderWithPainter && (opacity < 1.0 || (target->devType() == QInternal::Printer))) {
         d->render_helper(painter, targetOffset, toBePainted, renderFlags);
-        d->extra->inRenderWithPainter = false;
+        d->extra->inRenderWithPainter = inRenderWithPainter;
         return;
     }
 
@@ -4750,7 +4757,7 @@ void QWidget::render(QPainter *painter, const QPoint &targetOffset,
         enginePriv->setSystemViewport(oldSystemClip);
     }
 
-    render(target, targetOffset, toBePainted, renderFlags);
+    d->render(target, targetOffset, toBePainted, renderFlags);
 
     // Restore system clip, viewport and transform.
     enginePriv->systemClip = oldSystemClip;
@@ -4759,9 +4766,8 @@ void QWidget::render(QPainter *painter, const QPoint &targetOffset,
 
     // Restore shared painter.
     d->setSharedPainter(oldPainter);
-#endif
 
-    d->extra->inRenderWithPainter = false;
+    d->extra->inRenderWithPainter = inRenderWithPainter;
 }
 
 static void sendResizeEvents(QWidget *target)
@@ -5133,9 +5139,17 @@ void QWidgetPrivate::drawWidget(QPaintDevice *pdev, const QRegion &rgn, const QP
                      << "geometry ==" << QRect(q->mapTo(q->window(), QPoint(0, 0)), q->size());
 #endif
 
-            //actually send the paint event
-            QPaintEvent e(toBePainted);
-            QCoreApplication::sendSpontaneousEvent(q, &e);
+            if (renderToTexture) {
+                // This widget renders into a texture which is composed later. We just need to
+                // punch a hole in the backingstore, so the texture will be visible.
+                QPainter p(q);
+                p.setCompositionMode(QPainter::CompositionMode_Source);
+                p.fillRect(q->rect(), Qt::transparent);
+            } else {
+                //actually send the paint event
+                QPaintEvent e(toBePainted);
+                QCoreApplication::sendSpontaneousEvent(q, &e);
+            }
 
             // Native widgets need to be marked dirty on screen so painting will be done in correct context
             if (backingStore && !onScreen && !asRoot && (q->internalWinId() || !q->nativeParentWidget()->isWindow()))
@@ -5191,8 +5205,7 @@ void QWidgetPrivate::drawWidget(QPaintDevice *pdev, const QRegion &rgn, const QP
 }
 
 void QWidgetPrivate::render(QPaintDevice *target, const QPoint &targetOffset,
-                            const QRegion &sourceRegion, QWidget::RenderFlags renderFlags,
-                            bool readyToRender)
+                            const QRegion &sourceRegion, QWidget::RenderFlags renderFlags)
 {
     if (!target) {
         qWarning("QWidget::render: null pointer to paint device");
@@ -5200,7 +5213,7 @@ void QWidgetPrivate::render(QPaintDevice *target, const QPoint &targetOffset,
     }
 
     const bool inRenderWithPainter = extra && extra->inRenderWithPainter;
-    QRegion paintRegion = !inRenderWithPainter && !readyToRender
+    QRegion paintRegion = !inRenderWithPainter
                           ? prepareToRender(sourceRegion, renderFlags)
                           : sourceRegion;
     if (paintRegion.isEmpty())
@@ -5259,23 +5272,12 @@ void QWidgetPrivate::render(QPaintDevice *target, const QPoint &targetOffset,
 
     flags |= DontSetCompositionMode;
 
-    if (target->devType() == QInternal::Printer) {
-        QPainter p(target);
-        render_helper(&p, targetOffset, paintRegion, renderFlags);
-        return;
-    }
-
-#ifndef Q_WS_MAC
     // Render via backingstore.
     drawWidget(target, paintRegion, offset, flags, sharedPainter());
 
     // Restore shared painter.
     if (oldSharedPainter)
         setSharedPainter(oldSharedPainter);
-#else
-    // Render via backingstore (no shared painter).
-    drawWidget(target, paintRegion, offset, flags, 0);
-#endif
 }
 
 void QWidgetPrivate::paintSiblingsRecursive(QPaintDevice *pdev, const QObjectList& siblings, int index, const QRegion &rgn,
@@ -8356,6 +8358,8 @@ bool QWidget::event(QEvent *event)
                 d->extra->customDpiY = value;
             d->updateFont(d->data.fnt);
         }
+        if (windowHandle() && !qstrncmp(propName, "_q_platform_", 12))
+            windowHandle()->setProperty(propName, property(propName));
         // fall through
     }
 #endif
@@ -8521,6 +8525,8 @@ void QWidget::mouseReleaseEvent(QMouseEvent *event)
     This event handler, for event \a event, can be reimplemented in a
     subclass to receive mouse double click events for the widget.
 
+    The default implementation calls mousePressEvent().
+
     \note The widget will also receive mouse press and mouse release
     events in addition to the double click event. It is up to the
     developer to ensure that the application interprets these events
@@ -8532,7 +8538,7 @@ void QWidget::mouseReleaseEvent(QMouseEvent *event)
 
 void QWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    event->ignore();
+    mousePressEvent(event);
 }
 
 #ifndef QT_NO_WHEELEVENT
@@ -9583,6 +9589,23 @@ void QWidget::setParent(QWidget *parent)
     setParent((QWidget*)parent, windowFlags() & ~Qt::WindowType_Mask);
 }
 
+#ifndef QT_NO_OPENGL
+static void sendWindowChangeToTextureChildrenRecursively(QWidget *widget)
+{
+    QWidgetPrivate *d = QWidgetPrivate::get(widget);
+    if (d->renderToTexture) {
+        QEvent e(QEvent::WindowChangeInternal);
+        QApplication::sendEvent(widget, &e);
+    }
+
+    for (int i = 0; i < d->children.size(); ++i) {
+        QWidget *w = qobject_cast<QWidget *>(d->children.at(i));
+        if (w && !w->isWindow() && !w->isHidden() && QWidgetPrivate::get(w)->textureChildSeen)
+            sendWindowChangeToTextureChildrenRecursively(w);
+    }
+}
+#endif
+
 /*!
     \overload
 
@@ -9636,6 +9659,13 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
 
     if (desktopWidget)
         parent = 0;
+
+#ifndef QT_NO_OPENGL
+    if (d->textureChildSeen && parent) {
+        // set the textureChildSeen flag up the whole parent chain
+        QWidgetPrivate::get(parent)->setTextureChildSeen();
+    }
+#endif
 
     if (QWidgetBackingStore *oldBs = oldtlw->d_func()->maybeBackingStore()) {
         if (newParent)
@@ -9700,6 +9730,12 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
         QEvent e(QEvent::ParentChange);
         QApplication::sendEvent(this, &e);
     }
+#ifndef QT_NO_OPENGL
+    //renderToTexture widgets also need to know when their top-level window changes
+    if (d->textureChildSeen && oldtlw != window()) {
+        sendWindowChangeToTextureChildrenRecursively(this);
+    }
+#endif
 
     if (!wasCreated) {
         if (isWindow() || parentWidget()->isVisible())
@@ -9868,7 +9904,7 @@ void QWidget::repaint(const QRect &rect)
         QTLWExtra *tlwExtra = window()->d_func()->maybeTopData();
         if (tlwExtra && !tlwExtra->inTopLevelResize && tlwExtra->backingStore) {
             tlwExtra->inRepaint = true;
-            tlwExtra->backingStoreTracker->markDirty(rect, this, true);
+            tlwExtra->backingStoreTracker->markDirty(rect, this, QWidgetBackingStore::UpdateNow);
             tlwExtra->inRepaint = false;
         }
     } else {
@@ -9897,7 +9933,7 @@ void QWidget::repaint(const QRegion &rgn)
         QTLWExtra *tlwExtra = window()->d_func()->maybeTopData();
         if (tlwExtra && !tlwExtra->inTopLevelResize && tlwExtra->backingStore) {
             tlwExtra->inRepaint = true;
-            tlwExtra->backingStoreTracker->markDirty(rgn, this, true);
+            tlwExtra->backingStoreTracker->markDirty(rgn, this, QWidgetBackingStore::UpdateNow);
             tlwExtra->inRepaint = false;
         }
     } else {
@@ -11108,7 +11144,26 @@ void QWidgetPrivate::adjustQuitOnCloseAttribute()
     }
 }
 
-
+QOpenGLContext *QWidgetPrivate::shareContext() const
+{
+#ifdef QT_NO_OPENGL
+    return 0;
+#else
+    if (!extra || !extra->topextra || !extra->topextra->window) {
+        qWarning() << "Asking for share context for widget that does not have a window handle";
+        return 0;
+    }
+    QWidgetPrivate *that = const_cast<QWidgetPrivate *>(this);
+    if (!extra->topextra->shareContext) {
+        QOpenGLContext *ctx = new QOpenGLContext();
+        ctx->setShareContext(QOpenGLContextPrivate::globalShareContext());
+        ctx->setFormat(extra->topextra->window->format());
+        ctx->create();
+        that->extra->topextra->shareContext = ctx;
+    }
+    return that->extra->topextra->shareContext;
+#endif // QT_NO_OPENGL
+}
 
 Q_WIDGETS_EXPORT QWidgetData *qt_qwidget_data(QWidget *widget)
 {

@@ -80,6 +80,15 @@ namespace ABI {
                 struct IDisplayPropertiesStatics;
             }
         }
+#ifdef Q_OS_WINPHONE
+        namespace Phone {
+            namespace UI {
+                namespace Input {
+                    struct IBackPressedEventArgs;
+                }
+            }
+        }
+#endif
     }
 }
 struct IInspectable;
@@ -91,12 +100,6 @@ class QWinRTEGLContext;
 class QWinRTPageFlipper;
 class QWinRTCursor;
 class QWinRTInputContext;
-
-struct Pointer {
-    enum Type { Unknown, Mouse, TouchScreen, Tablet };
-    Type type;
-    QTouchDevice *device;
-};
 
 class QWinRTScreen : public QPlatformScreen
 {
@@ -149,9 +152,14 @@ private:
 
     HRESULT onOrientationChanged(IInspectable *);
 
+#ifdef Q_OS_WINPHONE
+    HRESULT onBackButtonPressed(IInspectable *, ABI::Windows::Phone::UI::Input::IBackPressedEventArgs *args);
+#endif
+
     ABI::Windows::UI::Core::ICoreWindow *m_coreWindow;
     ABI::Windows::UI::ViewManagement::IApplicationViewStatics *m_applicationView;
     ABI::Windows::ApplicationModel::Core::ICoreApplication *m_application;
+
     QRect m_geometry;
     QImage::Format m_format;
     QSurfaceFormat m_surfaceFormat;
@@ -170,7 +178,7 @@ private:
 #ifndef Q_OS_WINPHONE
     QHash<quint32, QPair<Qt::Key, QString> > m_activeKeys;
 #endif
-    QHash<quint32, Pointer> m_pointers;
+    QTouchDevice *m_touchDevice;
     QHash<quint32, QWindowSystemInterface::TouchPoint> m_touchPoints;
 };
 

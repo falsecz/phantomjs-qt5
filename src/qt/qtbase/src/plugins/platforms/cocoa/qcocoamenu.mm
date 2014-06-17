@@ -127,6 +127,7 @@ QT_NAMESPACE_ALIAS_OBJC_CLASS(QCocoaMenuDelegate);
 {
     QCocoaMenuItem *cocoaItem = reinterpret_cast<QCocoaMenuItem *>([item tag]);
     QScopedLoopLevelCounter loopLevelCounter(QGuiApplicationPrivate::instance()->threadData);
+    QGuiApplicationPrivate::modifier_buttons = [QNSView convertKeyModifiers:[NSEvent modifierFlags]];
     cocoaItem->activated();
 }
 
@@ -233,6 +234,10 @@ QCocoaMenu::QCocoaMenu() :
 
 QCocoaMenu::~QCocoaMenu()
 {
+    foreach (QCocoaMenuItem *item, m_menuItems) {
+        if (COCOA_MENU_ANCESTOR(item) == this)
+            SET_COCOA_MENU_ANCESTOR(item, 0);
+    }
     QCocoaAutoReleasePool pool;
     [m_nativeItem setSubmenu:nil];
     [m_nativeMenu release];
@@ -268,7 +273,6 @@ void QCocoaMenu::insertMenuItem(QPlatformMenuItem *menuItem, QPlatformMenuItem *
     QCocoaMenuItem *cocoaItem = static_cast<QCocoaMenuItem *>(menuItem);
     QCocoaMenuItem *beforeItem = static_cast<QCocoaMenuItem *>(before);
 
-    menuItem->setParent(this);
     cocoaItem->sync();
     if (beforeItem) {
         int index = m_menuItems.indexOf(beforeItem);
@@ -314,6 +318,7 @@ void QCocoaMenu::insertNative(QCocoaMenuItem *item, QCocoaMenuItem *beforeItem)
     } else {
         [m_nativeMenu addItem: item->nsItem()];
     }
+    SET_COCOA_MENU_ANCESTOR(item, this);
 }
 
 void QCocoaMenu::removeMenuItem(QPlatformMenuItem *menuItem)
@@ -325,8 +330,8 @@ void QCocoaMenu::removeMenuItem(QPlatformMenuItem *menuItem)
         return;
     }
 
-    if (menuItem->parent() == this)
-        menuItem->setParent(0);
+    if (COCOA_MENU_ANCESTOR(menuItem) == this)
+        SET_COCOA_MENU_ANCESTOR(menuItem, 0);
 
     m_menuItems.removeOne(cocoaItem);
     if (!cocoaItem->isMerged()) {
@@ -550,7 +555,7 @@ void QCocoaMenu::syncModalState(bool modal)
 void QCocoaMenu::setMenuBar(QCocoaMenuBar *menuBar)
 {
     m_menuBar = menuBar;
-    setParent(menuBar);
+    SET_COCOA_MENU_ANCESTOR(this, menuBar);
 }
 
 QCocoaMenuBar *QCocoaMenu::menuBar() const

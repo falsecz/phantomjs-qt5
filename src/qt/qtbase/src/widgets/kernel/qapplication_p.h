@@ -120,6 +120,7 @@ public:
     virtual void notifyActiveWindowChange(QWindow *);
 
     virtual bool shouldQuit();
+    bool tryCloseAllWindows() Q_DECL_OVERRIDE;
 
 #if defined(Q_WS_X11)
 #ifndef QT_NO_SETTINGS
@@ -136,6 +137,8 @@ public:
 
     void createEventDispatcher();
     static void dispatchEnterLeave(QWidget *enter, QWidget *leave, const QPointF &globalPosF);
+
+    void notifyWindowIconChanged() Q_DECL_OVERRIDE;
 
     //modality
     bool isWindowBlocked(QWindow *window, QWindow **blockingWindow = 0) const Q_DECL_OVERRIDE;
@@ -198,7 +201,6 @@ public:
     static QWidget *focus_widget;
     static QWidget *hidden_focus_widget;
     static QWidget *active_window;
-    static QIcon *app_icon;
 #ifndef QT_NO_WHEELEVENT
     static int  wheel_scroll_lines;
 #endif
@@ -283,7 +285,6 @@ public:
     QWidget *findClosestTouchPointTarget(QTouchDevice *device, const QPointF &screenPos);
     void appendTouchPoint(const QTouchEvent::TouchPoint &touchPoint);
     void removeTouchPoint(int touchPointId);
-    bool translateTouchToMouse(QWidget *widget, QTouchEvent *event);
     static bool translateRawTouchEvent(QWidget *widget,
                                        QTouchDevice *device,
                                        const QList<QTouchEvent::TouchPoint> &touchPoints,
@@ -293,6 +294,7 @@ public:
     QPixmap applyQIconStyleHelper(QIcon::Mode mode, const QPixmap& base) const;
 private:
     static QApplicationPrivate *self;
+    static bool tryCloseAllWidgetWindows(QWindowList *processedWindows);
 
     static void giveFocusAccordingToFocusPolicy(QWidget *w, QEvent *event, QPoint localPos);
     static bool shouldSetFocus(QWidget *w, Qt::FocusPolicy policy);

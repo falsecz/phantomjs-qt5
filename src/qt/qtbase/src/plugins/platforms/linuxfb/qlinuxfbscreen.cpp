@@ -148,7 +148,7 @@ static QSizeF determinePhysicalSize(const fb_var_screeninfo &vinfo, const QSize 
             mmWidth = vinfo.width;
             mmHeight = vinfo.height;
         } else {
-            const int dpi = 72;
+            const int dpi = 100;
             mmWidth = qRound(res.width() * 25.4 / dpi);
             mmHeight = qRound(res.height() * 25.4 / dpi);
         }
@@ -335,6 +335,8 @@ bool QLinuxFbScreen::initialize()
         QRegularExpressionMatch match;
         if (arg == QLatin1String("nographicsmodeswitch"))
             doSwitchToGraphicsMode = false;
+        else if (arg.contains(mmSizeRx, &match))
+            userMmSize = QSize(match.captured(1).toInt(), match.captured(2).toInt());
         else if (arg.contains(sizeRx, &match))
             userGeometry.setSize(QSize(match.captured(1).toInt(), match.captured(2).toInt()));
         else if (arg.contains(offsetRx, &match))
@@ -343,8 +345,6 @@ bool QLinuxFbScreen::initialize()
             ttyDevice = match.captured(1);
         else if (arg.contains(fbRx, &match))
             fbDevice = match.captured(1);
-        else if (arg.contains(mmSizeRx, &match))
-            userMmSize = QSize(match.captured(1).toInt(), match.captured(2).toInt());
     }
 
     if (fbDevice.isEmpty()) {
@@ -360,7 +360,7 @@ bool QLinuxFbScreen::initialize()
     // Open the device
     mFbFd = openFramebufferDevice(fbDevice);
     if (mFbFd == -1) {
-        qWarning("Failed to open framebuffer %s : %s", qPrintable(fbDevice), strerror(errno));
+        qErrnoWarning(errno, "Failed to open framebuffer %s", qPrintable(fbDevice));
         return false;
     }
 
@@ -371,12 +371,12 @@ bool QLinuxFbScreen::initialize()
     memset(&finfo, 0, sizeof(finfo));
 
     if (ioctl(mFbFd, FBIOGET_FSCREENINFO, &finfo) != 0) {
-        qWarning("Error reading fixed information: %s", strerror(errno));
+        qErrnoWarning(errno, "Error reading fixed information");
         return false;
     }
 
     if (ioctl(mFbFd, FBIOGET_VSCREENINFO, &vinfo)) {
-        qWarning("Error reading variable information: %s", strerror(errno));
+        qErrnoWarning(errno, "Error reading variable information");
         return false;
     }
 
@@ -391,7 +391,7 @@ bool QLinuxFbScreen::initialize()
     mMmap.size = finfo.smem_len;
     uchar *data = (unsigned char *)mmap(0, mMmap.size, PROT_READ | PROT_WRITE, MAP_SHARED, mFbFd, 0);
     if ((long)data == -1) {
-        qWarning("Failed to mmap framebuffer: %s", strerror(errno));
+        qErrnoWarning(errno, "Failed to mmap framebuffer");
         return false;
     }
 
@@ -420,10 +420,12 @@ bool QLinuxFbScreen::initialize()
 
     mTtyFd = openTtyDevice(ttyDevice);
     if (mTtyFd == -1)
-        qWarning() << "Failed to open tty" << strerror(errno);
+        qErrnoWarning(errno, "Failed to open tty");
 
-    if (doSwitchToGraphicsMode && !switchToGraphicsMode(mTtyFd, &mOldTtyMode))
-        qWarning() << "Failed to set graphics mode" << strerror(errno);
+    if (doSwitchToGraphicsMode)
+        switchToGraphicsMode(mTtyFd, &mOldTtyMode);
+        // Do not warn if the switch fails: the ioctl fails when launching from
+        // a remote console and there is nothing we can do about it.
 
     blankScreen(mFbFd, false);
 

@@ -59,12 +59,6 @@
 
 QT_BEGIN_NAMESPACE
 
-#ifndef QT_OPENGL_ES
-#define DEFAULT_FORMAT GL_RGBA8
-#else
-#define DEFAULT_FORMAT GL_RGBA
-#endif
-
 class QOpenGLFramebufferObjectFormatPrivate
 {
 public:
@@ -73,9 +67,18 @@ public:
           samples(0),
           attachment(QOpenGLFramebufferObject::NoAttachment),
           target(GL_TEXTURE_2D),
-          internal_format(DEFAULT_FORMAT),
           mipmap(false)
     {
+#ifndef QT_OPENGL_ES_2
+        // There is nothing that says QOpenGLFramebufferObjectFormat needs a current
+        // context, so we need a fallback just to be safe, even though in pratice there
+        // will usually be a context current.
+        QOpenGLContext *ctx = QOpenGLContext::currentContext();
+        const bool isES = ctx ? ctx->isOpenGLES() : QOpenGLContext::openGLModuleType() != QOpenGLContext::LibGL;
+        internal_format = isES ? GL_RGBA : GL_RGBA8;
+#else
+        internal_format = GL_RGBA;
+#endif
     }
     QOpenGLFramebufferObjectFormatPrivate
             (const QOpenGLFramebufferObjectFormatPrivate *other)

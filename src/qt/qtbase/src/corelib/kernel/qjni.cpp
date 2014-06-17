@@ -44,12 +44,18 @@
 #include <QtCore/qthreadstorage.h>
 #include <QtCore/qhash.h>
 #include <QtCore/qstring.h>
+#include <QtCore/QThread>
 
 QT_BEGIN_NAMESPACE
 
 static inline QString keyBase()
 {
     return QStringLiteral("%1%2%3");
+}
+
+static inline QByteArray threadBaseName()
+{
+    return QByteArrayLiteral("QtThread-");
 }
 
 static QString qt_convertJString(jstring string)
@@ -179,7 +185,10 @@ QJNIEnvironmentPrivate::QJNIEnvironmentPrivate()
 {
     JavaVM *vm = QtAndroidPrivate::javaVM();
     if (vm->GetEnv((void**)&jniEnv, JNI_VERSION_1_6) == JNI_EDETACHED) {
-        if (vm->AttachCurrentThread(&jniEnv, 0) != JNI_OK)
+        const qulonglong id = reinterpret_cast<qulonglong>(QThread::currentThreadId());
+        const QByteArray threadName = threadBaseName() + QByteArray::number(id);
+        JavaVMAttachArgs args = { JNI_VERSION_1_6, threadName, Q_NULLPTR };
+        if (vm->AttachCurrentThread(&jniEnv, &args) != JNI_OK)
             return;
     }
 
@@ -1264,6 +1273,8 @@ QJNIObjectPrivate QJNIObjectPrivate::callObjectMethod(const char *methodName,
     jmethodID id = getCachedMethodID(env, d->m_jclass, methodName, sig);
     if (id) {
         res = env->CallObjectMethodV(d->m_jobject, id, args);
+        if (res && env->ExceptionCheck())
+            res = 0;
     }
 
     QJNIObjectPrivate obj(res);
@@ -1342,6 +1353,8 @@ QJNIObjectPrivate QJNIObjectPrivate::callStaticObjectMethod(const char *classNam
         jmethodID id = getCachedMethodID(env, clazz, methodName, sig, true);
         if (id) {
             res = env->CallStaticObjectMethodV(clazz, id, args);
+            if (res && env->ExceptionCheck())
+                res = 0;
         }
     }
 
@@ -1372,6 +1385,8 @@ QJNIObjectPrivate QJNIObjectPrivate::callStaticObjectMethod(jclass clazz,
     jmethodID id = getCachedMethodID(env, clazz, methodName, sig, true);
     if (id) {
         res = env->CallStaticObjectMethodV(clazz, id, args);
+        if (res && env->ExceptionCheck())
+            res = 0;
     }
 
     QJNIObjectPrivate obj(res);
@@ -1685,8 +1700,11 @@ QJNIObjectPrivate QJNIObjectPrivate::getObjectField(const char *fieldName,
     QJNIEnvironmentPrivate env;
     jobject res = 0;
     jfieldID id = getCachedFieldID(env, d->m_jclass, fieldName, sig);
-    if (id)
+    if (id) {
         res = env->GetObjectField(d->m_jobject, id);
+        if (res && env->ExceptionCheck())
+            res = 0;
+    }
 
     QJNIObjectPrivate obj(res);
     env->DeleteLocalRef(res);
@@ -1713,8 +1731,11 @@ QJNIObjectPrivate QJNIObjectPrivate::getStaticObjectField(jclass clazz,
     QJNIEnvironmentPrivate env;
     jobject res = 0;
     jfieldID id = getCachedFieldID(env, clazz, fieldName, sig, true);
-    if (id)
+    if (id) {
         res = env->GetStaticObjectField(clazz, id);
+        if (res && env->ExceptionCheck())
+            res = 0;
+    }
 
     QJNIObjectPrivate obj(res);
     env->DeleteLocalRef(res);

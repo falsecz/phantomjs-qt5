@@ -246,6 +246,17 @@ QT_BEGIN_NAMESPACE
         The QNetworkSession ConnectInBackground property will be set according to
         this attribute.
 
+    \value SpdyAllowedAttribute
+        Requests only, type: QMetaType::Bool (default: false)
+        Indicates whether the QNetworkAccessManager code is
+        allowed to use SPDY with this request. This applies only
+        to SSL requests, and depends on the server supporting SPDY.
+
+    \value SpdyWasUsedAttribute
+        Replies only, type: QMetaType::Bool
+        Indicates whether SPDY was used for receiving
+        this reply.
+
     \value User
         Special type. Additional information can be passed in
         QVariants with types ranging from User to UserMax. The default
@@ -501,7 +512,7 @@ QList<QByteArray> QNetworkRequest::rawHeaderList() const
     will also set the known header LastModifiedHeader to be the
     QDateTime object of the parsed date.
 
-    Note: setting the same header twice overrides the previous
+    \note Setting the same header twice overrides the previous
     setting. To accomplish the behaviour of multiple HTTP headers of
     the same name, you should concatenate the two values, separating
     them with a comma (",") and set one single raw header.
@@ -517,7 +528,7 @@ void QNetworkRequest::setRawHeader(const QByteArray &headerName, const QByteArra
     Returns the attribute associated with the code \a code. If the
     attribute has not been set, it returns \a defaultValue.
 
-    Note: this function does not apply the defaults listed in
+    \note This function does not apply the defaults listed in
     QNetworkRequest::Attribute.
 
     \sa setAttribute(), QNetworkRequest::Attribute

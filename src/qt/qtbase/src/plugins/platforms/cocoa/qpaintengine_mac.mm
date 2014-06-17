@@ -488,7 +488,7 @@ static void qt_mac_draw_pattern(void *info, CGContextRef c)
             if (isBitmap)
                 pat->image = qt_mac_create_imagemask(pat->data.pixmap, pat->data.pixmap.rect());
             else
-                pat->image = qt_mac_image_to_cgimage(pat->data.pixmap.toImage());
+                pat->image = qt_mac_toCGImage(pat->data.pixmap.toImage());
         }
     } else {
         w = CGImageGetWidth(pat->image);
@@ -963,11 +963,11 @@ void QCoreGraphicsPaintEngine::drawPixmap(const QRectF &r, const QPixmap &pm, co
         CGContextSetFillColorWithColor(d->hd, cgColorForQColor(col, d->pdev));
         image = qt_mac_create_imagemask(pm, sr);
     } else if (differentSize) {
-        QCFType<CGImageRef> img = qt_mac_image_to_cgimage(pm.toImage());
+        QCFType<CGImageRef> img = qt_mac_toCGImage(pm.toImage());
         if (img)
             image = CGImageCreateWithImageInRect(img, CGRectMake(qRound(sr.x()), qRound(sr.y()), qRound(sr.width()), qRound(sr.height())));
     } else {
-        image = qt_mac_image_to_cgimage(pm.toImage());
+        image = qt_mac_toCGImage(pm.toImage());
     }
     qt_mac_drawCGImage(d->hd, &rect, image);
     if (doRestore)
@@ -977,43 +977,6 @@ void QCoreGraphicsPaintEngine::drawPixmap(const QRectF &r, const QPixmap &pm, co
 static void drawImageReleaseData (void *info, const void *, size_t)
 {
     delete static_cast<QImage *>(info);
-}
-
-CGImageRef qt_mac_createCGImageFromQImage(const QImage &img, const QImage **imagePtr = 0)
-{
-    QImage *image;
-    if (img.depth() != 32)
-        image = new QImage(img.convertToFormat(QImage::Format_ARGB32_Premultiplied));
-    else
-        image = new QImage(img);
-
-    uint cgflags = kCGImageAlphaNone;
-    switch (image->format()) {
-    case QImage::Format_ARGB32_Premultiplied:
-        cgflags = kCGImageAlphaPremultipliedFirst;
-        break;
-    case QImage::Format_ARGB32:
-        cgflags = kCGImageAlphaFirst;
-        break;
-    case QImage::Format_RGB32:
-        cgflags = kCGImageAlphaNoneSkipFirst;
-    default:
-        break;
-    }
-#if defined(kCGBitmapByteOrder32Host) //only needed because CGImage.h added symbols in the minor version
-    cgflags |= kCGBitmapByteOrder32Host;
-#endif
-    QCFType<CGDataProviderRef> dataProvider = CGDataProviderCreateWithData(image,
-                                                          static_cast<const QImage *>(image)->bits(),
-                                                          image->byteCount(),
-                                                          drawImageReleaseData);
-    if (imagePtr)
-        *imagePtr = image;
-    return CGImageCreate(image->width(), image->height(), 8, 32,
-                                        image->bytesPerLine(),
-                                        QCoreGraphicsPaintEngine::macGenericColorSpace(),
-                                        cgflags, dataProvider, 0, false, kCGRenderingIntentDefault);
-
 }
 
 void QCoreGraphicsPaintEngine::drawImage(const QRectF &r, const QImage &img, const QRectF &sr,
@@ -1026,8 +989,7 @@ void QCoreGraphicsPaintEngine::drawImage(const QRectF &r, const QImage &img, con
     if (img.isNull() || state->compositionMode() == QPainter::CompositionMode_Destination)
         return;
 
-    const QImage *image;
-    QCFType<CGImageRef> cgimage = qt_mac_createCGImageFromQImage(img, &image);
+    QCFType<CGImageRef> cgimage = qt_mac_toCGImage(img);
     CGRect rect = CGRectMake(r.x(), r.y(), r.width(), r.height());
     if (QRectF(0, 0, img.width(), img.height()) != sr)
         cgimage = CGImageCreateWithImageInRect(cgimage, CGRectMake(sr.x(), sr.y(),

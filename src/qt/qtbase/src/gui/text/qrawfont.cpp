@@ -665,7 +665,7 @@ QList<QFontDatabase::WritingSystem> QRawFont::supportedWritingSystems() const
 */
 bool QRawFont::supportsCharacter(QChar character) const
 {
-    return d->isValid() && d->fontEngine->canRender(&character, 1);
+    return supportsCharacter(character.unicode());
 }
 
 /*!
@@ -700,10 +700,7 @@ QRawFont QRawFont::fromFont(const QFont &font, QFontDatabase::WritingSystem writ
     if (fe != 0 && fe->type() == QFontEngine::Multi) {
         QFontEngineMulti *multiEngine = static_cast<QFontEngineMulti *>(fe);
         fe = multiEngine->engine(0);
-        if (fe == 0) {
-            multiEngine->loadEngine(0);
-            fe = multiEngine->engine(0);
-        }
+        Q_ASSERT(fe);
     }
 
     if (fe != 0) {

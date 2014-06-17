@@ -60,3 +60,6 @@ build/
 .gradle/
 .qmake.stash
 phantomjs_plugin_import.cpp
+
+# special files
+!/src/qt/qtbase/configure.exe

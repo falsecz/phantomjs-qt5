@@ -52,32 +52,77 @@
 
 QT_FORWARD_DECLARE_CLASS(QCocoaWindow)
 
-@class QNSWindowDelegate;
+@class QNSWindowHelper;
 
-@interface QNSWindow : NSPanel {
-@public
-   QCocoaWindow *m_cocoaPlatformWindow;
-}
+@protocol QNSWindowProtocol
 
-- (void)clearPlatformWindow;
+@property (nonatomic, readonly) QNSWindowHelper *helper;
+
+- (void)superSendEvent:(NSEvent *)theEvent;
+- (void)closeAndRelease;
+
 @end
 
-QT_BEGIN_NAMESPACE
+typedef NSWindow<QNSWindowProtocol> QCocoaNSWindow;
 
+@interface QNSWindowHelper : NSObject
+{
+    QCocoaNSWindow *_window;
+    QCocoaWindow *_platformWindow;
+    BOOL _grabbingMouse;
+    BOOL _releaseOnMouseUp;
+}
+
+@property (nonatomic, readonly) QCocoaNSWindow *window;
+@property (nonatomic, readonly) QCocoaWindow *platformWindow;
+@property (nonatomic) BOOL grabbingMouse;
+@property (nonatomic) BOOL releaseOnMouseUp;
+
+- (id)initWithNSWindow:(QCocoaNSWindow *)window platformWindow:(QCocoaWindow *)platformWindow;
+- (void)handleWindowEvent:(NSEvent *)theEvent;
+- (void) clearWindow;
+
+@end
+
+@interface QNSWindow : NSWindow<QNSWindowProtocol>
+{
+    QNSWindowHelper *_helper;
+}
+
+@property (nonatomic, readonly) QNSWindowHelper *helper;
+
+- (id)initWithContentRect:(NSRect)contentRect
+      styleMask:(NSUInteger)windowStyle
+      qPlatformWindow:(QCocoaWindow *)qpw;
+
+@end
+
+@interface QNSPanel : NSPanel<QNSWindowProtocol>
+{
+    QNSWindowHelper *_helper;
+}
+
+@property (nonatomic, readonly) QNSWindowHelper *helper;
+
+- (id)initWithContentRect:(NSRect)contentRect
+      styleMask:(NSUInteger)windowStyle
+      qPlatformWindow:(QCocoaWindow *)qpw;
+
+@end
+
+@class QNSWindowDelegate;
+
+QT_BEGIN_NAMESPACE
 // QCocoaWindow
 //
-// A QCocoaWindow is backed by a NSView and optionally a NSWindow.
+// QCocoaWindow is an NSView (not an NSWindow!) in the sense
+// that it relies on a NSView for all event handling and
+// graphics output and does not require a NSWindow, except for
+// for the window-related functions like setWindowTitle.
 //
-// The NSView is used for most event handling and graphics output.
-//
-// Top-level QWindows are always backed by a NSWindow in addition to
-// the NSView. Child QWindows can also be backed by NSWindows, which
-// enables proper stacking of GL Widgets and threaded GL rendering
-// to multiple contexts.
-//
-// It is possible to embed the QCocoaWindow in an NSView hierarchy
-// by getting a pointer to the backing NSView and not calling
-// QCocoaWindow::show():
+// As a consequence of this it is possible to embed the QCocoaWindow
+// in an NSView hierarchy by getting a pointer to the "backing"
+// NSView and not calling QCocoaWindow::show():
 //
 // QWindow *qtWindow = new MyWindow();
 // qtWindow->create();
@@ -97,6 +142,7 @@ public:
     ~QCocoaWindow();
 
     void setGeometry(const QRect &rect);
+    QRect geometry() const;
     void setCocoaGeometry(const QRect &rect);
     void clipChildWindows();
     void clipWindow(const NSRect &clipRect);
@@ -137,15 +183,16 @@ public:
     void windowWillMove();
     void windowDidMove();
     void windowDidResize();
+    void windowDidEndLiveResize();
     bool windowShouldClose();
     bool windowIsPopupType(Qt::WindowType type = Qt::Widget) const;
-    bool windowShouldBehaveAsPanel() const;
 
     void setSynchedWindowStateFromWindow();
 
     NSInteger windowLevel(Qt::WindowFlags flags);
     NSUInteger windowStyleMask(Qt::WindowFlags flags);
     void setWindowShadow(Qt::WindowFlags flags);
+    void setWindowZoomButton(Qt::WindowFlags flags);
 
 #ifndef QT_NO_OPENGL
     void setCurrentContext(QCocoaGLContext *context);
@@ -165,6 +212,10 @@ public:
 
     void registerTouch(bool enable);
     void setContentBorderThickness(int topThickness, int bottomThickness);
+    void registerContentBorderArea(quintptr identifier, int upper, int lower);
+    void setContentBorderAreaEnabled(quintptr identifier, bool enable);
+    void setContentBorderEnabled(bool enable);
+    bool testContentBorderAreaPosition(int position) const;
     void applyContentBorderThickness(NSWindow *window);
     void updateNSToolbar();
 
@@ -176,9 +227,10 @@ public:
     QWindow *childWindowAt(QPoint windowPoint);
 protected:
     void recreateWindow(const QPlatformWindow *parentWindow);
-    QNSWindow *createNSWindow();
-    void setNSWindow(QNSWindow *window);
-    void clearNSWindow(QNSWindow *window);
+    QCocoaNSWindow *createNSWindow();
+    void setNSWindow(QCocoaNSWindow *window);
+
+    bool shouldUseNSPanel();
 
     QRect windowGeometry() const;
     QCocoaWindow *parentCocoaWindow() const;
@@ -193,7 +245,7 @@ public: // for QNSView
 
     NSView *m_contentView;
     QNSView *m_qtView;
-    QNSWindow *m_nsWindow;
+    QCocoaNSWindow *m_nsWindow;
     QCocoaWindow *m_forwardWindow;
 
     // TODO merge to one variable if possible
@@ -204,8 +256,8 @@ public: // for QNSView
     bool m_isNSWindowChild; // this window is a non-top level QWindow with a NSWindow.
     QList<QCocoaWindow *> m_childWindows;
 
-    QNSWindowDelegate *m_nsWindowDelegate;
     Qt::WindowFlags m_windowFlags;
+    bool m_effectivelyMaximized;
     Qt::WindowState m_synchedWindowState;
     Qt::WindowModality m_windowModality;
     QPointer<QWindow> m_activePopupWindow;
@@ -224,6 +276,7 @@ public: // for QNSView
     bool m_geometryUpdateExposeAllowed;
     bool m_isExposed;
     QRect m_exposedGeometry;
+    qreal m_exposedDevicePixelRatio;
     int m_registerTouchCount;
     bool m_resizableTransientParent;
     bool m_hiddenByClipping;
@@ -241,6 +294,18 @@ public: // for QNSView
     QRect m_normalGeometry;
     Qt::WindowFlags m_oldWindowFlags;
     NSApplicationPresentationOptions m_presentationOptions;
+
+    struct BorderRange {
+        BorderRange(quintptr i, int u, int l) : identifier(i), upper(u), lower(l) { }
+        quintptr identifier;
+        int upper;
+        int lower;
+        bool operator<(BorderRange const& right) const {
+              return upper < right.upper;
+        }
+    };
+    QHash<quintptr, BorderRange> m_contentBorderAreas; // identifer -> uppper/lower
+    QHash<quintptr, bool> m_enabledContentBorderAreas; // identifer -> enabled state (true/false)
 };
 
 QT_END_NAMESPACE
