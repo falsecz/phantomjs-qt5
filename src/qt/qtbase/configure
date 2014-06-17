@@ -3883,6 +3883,9 @@ if [ -e "$relpath/.git" ]; then
     fi
 
     "$relpath/bin/syncqt.pl" -minimal -module QtCore "$relpath" || exit 1
+
+elif [ -x "$relpath/bin/syncqt" ]; then
+    "$relpath/bin/syncqt.pl" -minimal -module QtCore "$relpath" || exit 1
 fi
 
 # $1: input variable name (awk regexp)
