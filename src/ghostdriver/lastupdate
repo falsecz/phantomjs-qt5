@@ -1,7 +1,20 @@
-2014-05-26 08:46:33
+2014-06-19 22:46:10
 
-commit 54afa3f01e487e4c48f3d9ae9e9ec352eec9a3c2 (HEAD, refs/remotes/origin/master, refs/remotes/origin/HEAD, refs/heads/master)
+commit 6c918e230cc98a7bce75e652c020c55cc3e0dd23 (HEAD, refs/remotes/origin/master, refs/remotes/origin/HEAD, refs/heads/master)
 Author: Ivan De Marino <detronizator@gmail.com>
-Date:   Fri May 23 21:36:07 2014 +0100
+Date:   Tue Jun 10 23:34:43 2014 +0100
 
-    Adding commented line useful during testing with PhantomJS 2 (Qt5)
+    Return Selenium own Java Exception on Failed Cmd.
+    
+    Selenium server assumes that in the JSON response
+    of a failed command, the “class” field returns the
+    fully qualified name of the Java Exception the
+    Server is supposed to map the error to.
+    
+    A very “cavalier” behaviour that I have changed
+    in Selenium (see https://code.google.com/p/selenium/source/detail?r=4959695b2267deb16d829290d47c73e829c59422).
+    But, in the meantime, I decide I’d make GhostDriver
+    comply: so far I haven’t really used that field
+    to report anything useful, so it’s OK to change.
+    
+    Fixes #354.

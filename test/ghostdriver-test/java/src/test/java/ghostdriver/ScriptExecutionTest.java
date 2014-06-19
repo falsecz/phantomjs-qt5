@@ -89,7 +89,7 @@ public class ScriptExecutionTest extends BaseTest {
         assertEquals("abc", stringResult);
     }
 
-    @Ignore("Known issue #140 - see https://github.com/detro/ghostdriver/issues/140)")
+    // @Ignore("Known issue #140 - see https://github.com/detro/ghostdriver/issues/140)")
     @Test
     public void shouldBeAbleToExecuteMultipleAsyncScriptsSequentiallyWithNavigation() {
         // NOTE: This test is supposed to fail!
@@ -112,7 +112,7 @@ public class ScriptExecutionTest extends BaseTest {
         d.get("http://www.google.com/");
     }
 
-    @Ignore("Known issue #140 - see https://github.com/detro/ghostdriver/issues/140)")
+    // @Ignore("Known issue #140 - see https://github.com/detro/ghostdriver/issues/140)")
     @Test
     public void executeAsyncScriptMultipleTimesWithoutCrashing() {
         // NOTE: This test is supposed to fail!
