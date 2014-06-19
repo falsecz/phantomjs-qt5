@@ -213,7 +213,6 @@ void *QCocoaNativeInterface::cglContextForContext(QOpenGLContext* context)
         return [nsOpenGLContext CGLContextObj];
     return 0;
 }
-#endif
 
 void *QCocoaNativeInterface::nsOpenGLContextForContext(QOpenGLContext* context)
 {
@@ -225,6 +224,7 @@ void *QCocoaNativeInterface::nsOpenGLContextForContext(QOpenGLContext* context)
     }
     return 0;
 }
+#endif
 
 void QCocoaNativeInterface::addToMimeList(void *macPasteboardMime)
 {
