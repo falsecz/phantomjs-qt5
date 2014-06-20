@@ -742,7 +742,7 @@ JSValueRef convertQVariantToValue(JSContextRef context, PassRefPtr<RootObject> r
             return JSValueMakeNull(context);
         ExecState* exec = toJS(context);
         APIEntryShim entryShim(exec);
-        return toRef(exec, QtInstance::getQtInstance(obj, root, QtInstance::QtOwnership)->createRuntimeObject(exec));
+        return toRef(exec, QtInstance::getQtInstance(obj, root.get(), QtInstance::QtOwnership)->createRuntimeObject(exec));
     }
 
     if (QtPixmapRuntime::canHandle(static_cast<QMetaType::Type>(variant.type())))
