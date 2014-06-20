@@ -118,12 +118,9 @@ win32-msvc* {
       breakpad/src/common/windows/guid_string.cc
     CONFIG(static) {
         DEFINES += STATIC_BUILD
-        QTPLUGIN += \
-            qico
     }
 }
 
 openbsd* {
     LIBS += -L/usr/X11R6/lib
 }
-
