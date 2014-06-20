@@ -24,8 +24,8 @@ set QT_CONFIG=!QT_CONFIG! -qt-libpng
 set QT_CONFIG=!QT_CONFIG! -qt-libjpeg
 set QT_CONFIG=!QT_CONFIG! -openssl-linked
 
-configure !QT_CONFIG!
+call configure.bat !QT_CONFIG!
 
-%MAKE_TOOL% %BUILD_TYPE%
+call %MAKE_TOOL% %BUILD_TYPE%
 
 popd
