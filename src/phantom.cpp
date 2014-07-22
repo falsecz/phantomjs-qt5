@@ -45,6 +45,7 @@
 #include "utils.h"
 #include "webpage.h"
 #include "webserver.h"
+#include "rabbit.h"
 #include "repl.h"
 #include "system.h"
 #include "callback.h"
@@ -348,6 +349,14 @@ QObject* Phantom::createWebServer()
     m_servers.append(server);
     return server;
 }
+
+QObject* Phantom::createRabbit()
+{
+    Rabbit *amqp = new Rabbit(this);
+    // m_servers.append(server); TODO
+    return amqp;
+}
+
 
 QObject *Phantom::createFilesystem()
 {
