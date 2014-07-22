@@ -57,6 +57,10 @@ exports.createClient = function (connectionString) {
 	var handlers = {};
 	var events = {};
 
+	this.readFileBase64 = function(string) {
+		return server.readFileBase64(string);
+	}
+
 	this.stringToBase64 = function(string) {
 		return server.stringToBase64(string);
 	}

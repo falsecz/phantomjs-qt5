@@ -57,6 +57,7 @@ public slots:
 	void disconnected();
 	void error(QString);
 
+	QString readFileBase64(QString);
 	QString stringToBase64(QString);
 	QString base64ToString(QString);
 	QObject* createQueue();

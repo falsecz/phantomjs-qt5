@@ -48,6 +48,8 @@
 #include <QVector>
 #include <QDebug>
 
+#include <QFile>
+
 Rabbit::Rabbit(QObject *parent)
     : QObject(parent)
 {
@@ -59,6 +61,12 @@ Rabbit::Rabbit(QObject *parent)
 
 Rabbit::~Rabbit() {
     // close();
+}
+
+QString Rabbit::readFileBase64(QString path) {
+	QFile* file = new QFile(path);
+	file->open(QIODevice::ReadOnly);
+	return QString(file->readAll().toBase64());
 }
 
 QString Rabbit::stringToBase64(QString string) {
