@@ -186,6 +186,25 @@ exports.createClient = function (connectionString) {
 
 		qQueue.declare(name, options);
 
+		selfQueue.get = function(callback) {
+			defineSetter(qQueue, "handleMsg", "newMsg");
+			defineSetter(qQueue, "empty", "queueEmpty");
+			qQueue.empty = function() {
+				callback.apply(callback, null);
+			}
+			qQueue.handleMsg = function(message) {
+				args = Array.prototype.slice.call(arguments, 1);
+				try {
+					message = JSON.parse(message);
+				}
+				catch(e) {}
+
+				callback.apply(callback, ([message].concat(args)));
+			};
+			qQueue.get();
+
+		}
+
 		selfQueue.subscribe = function(options, callback) {
 			defineSetter(qQueue, "handleMsg", "newMsg");
 			qQueue.handleMsg = function(message) {

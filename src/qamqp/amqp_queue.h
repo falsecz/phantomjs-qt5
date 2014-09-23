@@ -18,22 +18,22 @@ namespace QAMQP
 		Q_PROPERTY(QueueOptions option READ option );
 		Q_PROPERTY(QString consumerTag READ consumerTag WRITE setConsumerTag)
 		Q_PROPERTY(bool noAck READ noAck WRITE setNoAck)
-		
+
 		P_DECLARE_PRIVATE(QAMQP::Queue)
-		Q_DISABLE_COPY(Queue);	
+		Q_DISABLE_COPY(Queue);
 		friend class ClientPrivate;
 
 	protected:
 		void onOpen();
 		void onClose();
-	
+
 	public:
 		enum QueueOption {
 			NoOptions = 0x0,
 			Passive = 0x01,
 			Durable = 0x02,
 			Exclusive = 0x4,
-			AutoDelete = 0x8,			
+			AutoDelete = 0x8,
 			NoWait = 0x10
 		};
 		Q_DECLARE_FLAGS(QueueOptions, QueueOption)
@@ -41,7 +41,7 @@ namespace QAMQP
 		enum ConsumeOption {
 				coNoLocal = 0x1,
 				coNoAck = 0x02,
-				coExclusive = 0x04,	
+				coExclusive = 0x04,
 				coNoWait = 0x8
 		};
 		Q_DECLARE_FLAGS(ConsumeOptions, ConsumeOption)
@@ -72,7 +72,7 @@ namespace QAMQP
 
 		void setNoAck(bool noAck);
 		bool noAck() const;
-	
+
 	Q_SIGNALS:
 		void declared();
 		void binded(bool);

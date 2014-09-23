@@ -131,6 +131,10 @@ void RabbitQueue::setQOS(qint32 prefetchSize, quint16 prefetchCount) {
 	queue->setQOS(prefetchSize, prefetchCount);
 }
 
+void RabbitQueue::empty() {
+	queueEmpty();
+}
+
 void RabbitQueue::messageReceived(QAMQP::Queue* q) {
 	while (q->hasMessage()) {
 		QAMQP::MessagePtr message = q->getMessage();
@@ -171,6 +175,12 @@ void RabbitQueue::messageReceived(QAMQP::Queue* q) {
 void RabbitQueue::consume() {
 	connect(queue, SIGNAL(messageReceived(QAMQP::Queue*)), this, SLOT(messageReceived(QAMQP::Queue*)));
 	queue->consume();
+}
+
+void RabbitQueue::get() {
+	connect(queue, SIGNAL(messageReceived(QAMQP::Queue*)), this, SLOT(messageReceived(QAMQP::Queue*)), Qt::UniqueConnection);
+	connect(queue, SIGNAL(empty()), this, SLOT(empty()), Qt::UniqueConnection);
+	queue->get();
 }
 
 void RabbitQueue::declared() {
