@@ -187,12 +187,16 @@ exports.createClient = function (connectionString) {
 		qQueue.declare(name, options);
 
 		selfQueue.get = function(callback) {
+			console.log("get called")
 			defineSetter(qQueue, "handleMsg", "newMsg");
 			defineSetter(qQueue, "empty", "queueEmpty");
+			console.log("handlers");
 			qQueue.empty = function() {
+				console.log("empty")
 				callback.apply(callback, null);
 			}
 			qQueue.handleMsg = function(message) {
+				console.log("handleMsg")
 				args = Array.prototype.slice.call(arguments, 1);
 				try {
 					message = JSON.parse(message);
