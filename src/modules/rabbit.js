@@ -69,18 +69,34 @@ exports.createClient = function (connectionString) {
 		return server.base64ToString(string);
 	}
 
-    function defineSetter(o, handlerName, signalName) {
-        o.__defineSetter__(handlerName, function (f) {
-            if (handlers && typeof handlers[signalName] === 'function') {
-                try {
-                    this[signalName].disconnect(handlers[signalName]);
-                } catch (e) {
-                }
-            }
-            handlers[signalName] = f;
-            this[signalName].connect(handlers[signalName]);
-        });
-    }
+	function defineSetter(o, handlerName, signalName) {
+		Object.defineProperty(o, handlerName, {
+			set: function (f) {
+				// Disconnect previous handler (if any)
+				if (!!handlers[handlerName] && typeof handlers[handlerName].callback === "function") {
+					try {
+						this[signalName].disconnect(handlers[handlerName].callback);
+					} catch (e) {}
+				}
+
+				// Delete the previous handler
+				delete handlers[handlerName];
+
+				// Connect the new handler iff it's a function
+				if (typeof f === "function") {
+					// Store the new handler for reference
+					handlers[handlerName] = {
+						callback: f
+					}
+				this[signalName].connect(f);
+				}
+			},
+			get: function() {
+				return !!handlers[handlerName] && typeof handlers[handlerName].callback === "function" ?
+					handlers[handlerName].callback : undefined;
+			}
+		});
+	};
 
 	this.on = function(e, cb) {
 		if(!events[e]) {
@@ -187,16 +203,13 @@ exports.createClient = function (connectionString) {
 		qQueue.declare(name, options);
 
 		selfQueue.get = function(callback) {
-			console.log("get called")
 			defineSetter(qQueue, "handleMsg", "newMsg");
-			defineSetter(qQueue, "empty", "queueEmpty");
-			console.log("handlers");
-			qQueue.empty = function() {
-				console.log("empty")
+			defineSetter(qQueue, "emptyCallback", "queueEmpty");
+
+			qQueue.emptyCallback = function() {
 				callback.apply(callback, null);
 			}
 			qQueue.handleMsg = function(message) {
-				console.log("handleMsg")
 				args = Array.prototype.slice.call(arguments, 1);
 				try {
 					message = JSON.parse(message);
